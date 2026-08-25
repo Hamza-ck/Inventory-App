@@ -1,23 +1,28 @@
 import { useLiveQuery } from 'dexie-react-hooks'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ArrowDown, ArrowUp, Trash2, Plus, Minus, Inbox } from 'lucide-react'
 import { db, updateQueueQty, removeFromQueue } from '../lib/db'
 
 export default function QueueList() {
   const items = useLiveQuery(() => db.queue.orderBy('createdAt').reverse().toArray(), [])
 
   if (!items) return null
+
   if (items.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: '36px 16px', background: 'var(--bg-card)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)', marginBottom: 20 }}>
-        <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--bg-surface)', margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-subtle)' }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <path d="M16 10a4 4 0 0 1-8 0" />
-          </svg>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex flex-col items-center justify-center p-8 bg-white border border-dashed border-slate-300 rounded-2xl text-center mb-6 shadow-sm"
+      >
+        <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
+          <Inbox className="w-6 h-6" />
         </div>
-        <p style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>Scan Queue is Empty</p>
-        <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>Scan a QR code or type a SKU above to add inward or outward items.</p>
-      </div>
+        <p className="font-semibold text-slate-800 text-sm mb-1">Scan Queue is Empty</p>
+        <p className="text-xs text-slate-500 max-w-xs">
+          Scan a QR code or enter a SKU above to queue inward or outward items.
+        </p>
+      </motion.div>
     )
   }
 
@@ -28,93 +33,112 @@ export default function QueueList() {
   }
 
   return (
-    <div className="queue-cards">
-      {items.map((item) => {
-        const qtyNum = Number(item.qty) || 0
-        return (
-          <div key={item.id} className="queue-card">
-            <div className="queue-card-top">
-              <div>
-                <div className="queue-card-title">{item.name || 'Unregistered Material'}</div>
-                <span className="queue-card-sku">SKU: {item.sku}</span>
-              </div>
-              <span className={`dir-badge ${item.direction}`}>
-                {item.direction === 'in' ? '⬇ Inward' : '⬆ Outward'}
-              </span>
-            </div>
+    <div className="space-y-3 mb-6">
+      <AnimatePresence>
+        {items.map((item) => {
+          const isIn = item.direction === 'in'
+          return (
+            <motion.div
+              key={item.id}
+              layout
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+              className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow"
+            >
+              {/* Card Top */}
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="min-w-0 flex-1">
+                  <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-tight truncate">
+                    {item.name || 'Unregistered Material'}
+                  </h4>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                      {item.sku}
+                    </span>
+                  </div>
+                </div>
 
-            <div className="queue-card-bottom">
-              {/* Stepper Input */}
-              <div className="stepper-container">
-                <button
-                  type="button"
-                  className="stepper-btn"
-                  onClick={() => adjustQty(item.id, item.qty, -1)}
-                  aria-label="Decrease quantity"
+                <span
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold shrink-0 ${
+                    isIn
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200'
+                  }`}
                 >
-                  −
-                </button>
-                <input
-                  type="number"
-                  min="0"
-                  inputMode="numeric"
-                  placeholder="Qty"
-                  value={item.qty}
-                  onChange={(e) => updateQueueQty(item.id, e.target.value)}
-                  className="stepper-input"
-                />
-                <button
-                  type="button"
-                  className="stepper-btn"
-                  onClick={() => adjustQty(item.id, item.qty, 1)}
-                  aria-label="Increase quantity"
-                >
-                  +
-                </button>
-              </div>
-
-              {/* Quick Presets */}
-              <div className="preset-chips">
-                <button
-                  type="button"
-                  className="preset-chip"
-                  onClick={() => adjustQty(item.id, item.qty, 5)}
-                >
-                  +5
-                </button>
-                <button
-                  type="button"
-                  className="preset-chip"
-                  onClick={() => adjustQty(item.id, item.qty, 10)}
-                >
-                  +10
-                </button>
-                <button
-                  type="button"
-                  className="preset-chip"
-                  onClick={() => adjustQty(item.id, item.qty, 50)}
-                >
-                  +50
-                </button>
+                  {isIn ? (
+                    <>
+                      <ArrowDown className="w-3.5 h-3.5" /> Inward
+                    </>
+                  ) : (
+                    <>
+                      <ArrowUp className="w-3.5 h-3.5" /> Outward
+                    </>
+                  )}
+                </span>
               </div>
 
-              {/* Delete Button */}
-              <button
-                type="button"
-                className="btn-ghost"
-                style={{ color: 'var(--outward)', padding: '6px', marginLeft: 'auto' }}
-                onClick={() => removeFromQueue(item.id)}
-                aria-label="Remove item"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        )
-      })}
+              {/* Card Bottom: Stepper and Presets */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                {/* Stepper Input */}
+                <div className="flex items-center bg-slate-100 rounded-xl p-1 border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => adjustQty(item.id, item.qty, -1)}
+                    className="w-8 h-8 rounded-lg bg-white shadow-xs border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-50 active:scale-95 transition-all"
+                    aria-label="Decrease quantity"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+
+                  <input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    placeholder="Qty"
+                    value={item.qty}
+                    onChange={(e) => updateQueueQty(item.id, e.target.value)}
+                    className="w-14 text-center font-bold text-slate-900 bg-transparent text-sm focus:outline-none"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => adjustQty(item.id, item.qty, 1)}
+                    className="w-8 h-8 rounded-lg bg-white shadow-xs border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-50 active:scale-95 transition-all"
+                    aria-label="Increase quantity"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Quick Add Presets */}
+                <div className="flex items-center gap-1.5">
+                  {[5, 10, 50].map((amount) => (
+                    <button
+                      key={amount}
+                      type="button"
+                      onClick={() => adjustQty(item.id, item.qty, amount)}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 border border-slate-200 text-slate-600 active:scale-95 transition-all"
+                    >
+                      +{amount}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Remove button */}
+                <button
+                  type="button"
+                  onClick={() => removeFromQueue(item.id)}
+                  className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors ml-auto"
+                  title="Remove from queue"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </motion.div>
+          )
+        })}
+      </AnimatePresence>
     </div>
   )
 }

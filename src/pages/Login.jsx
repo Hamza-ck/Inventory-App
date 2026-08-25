@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import { Mail, Lock, Eye, EyeOff, QrCode, LogIn, AlertCircle } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 
 export default function Login() {
@@ -21,29 +23,32 @@ export default function Login() {
   }
 
   return (
-    <div className="auth-wrapper">
-      <div className="auth-card">
-        <div className="auth-header">
-          <div className="auth-logo">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="7" height="7" rx="1.5" />
-              <rect x="14" y="3" width="7" height="7" rx="1.5" />
-              <rect x="14" y="14" width="7" height="7" rx="1.5" />
-              <rect x="3" y="14" width="7" height="7" rx="1.5" />
-            </svg>
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+      {/* Ambient background glows */}
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
+
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="w-full max-w-md bg-white rounded-3xl p-7 sm:p-9 shadow-2xl border border-slate-100 z-10"
+      >
+        {/* Brand Header */}
+        <div className="text-center mb-7">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white mx-auto mb-3.5 shadow-lg shadow-blue-600/30">
+            <QrCode className="w-7 h-7" />
           </div>
-          <h1>Inventory Scan</h1>
-          <p style={{ marginTop: 4 }}>Sign in to access scanner & dashboard</p>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Inventory Scan</h1>
+          <p className="text-xs text-slate-500 mt-1">Sign in to access scanner, queue & dashboard</p>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Work Email</label>
-            <div className="search-input-wrapper">
-              <svg className="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                <polyline points="22,6 12,13 2,6" />
-              </svg>
+        {/* Login Form */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">Work Email</label>
+            <div className="relative">
+              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="email"
                 placeholder="name@company.com"
@@ -51,17 +56,15 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
+                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
           </div>
 
-          <div className="form-group" style={{ marginBottom: 20 }}>
-            <label>Password</label>
-            <div className="search-input-wrapper" style={{ position: 'relative' }}>
-              <svg className="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">Password</label>
+            <div className="relative">
+              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
@@ -69,45 +72,49 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
-                style={{ paddingRight: 40 }}
+                className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
               <button
                 type="button"
-                className="btn-ghost"
                 onClick={() => setShowPassword(!showPassword)}
-                style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', padding: 6, color: 'var(--text-subtle)' }}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
                 title={showPassword ? 'Hide Password' : 'Show Password'}
               >
-                {showPassword ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </svg>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                )}
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
 
           {error && (
-            <div className="toast-banner toast-error" style={{ marginBottom: 16 }}>
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-medium flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
-          <button type="submit" className="btn-primary" style={{ width: '100%', padding: '12px', fontSize: '1rem' }} disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-600/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Signing in...</span>
+              </>
+            ) : (
+              <>
+                <LogIn className="w-4 h-4" />
+                <span>Sign In</span>
+              </>
+            )}
           </button>
         </form>
 
-        <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 20 }}>
-          Accounts are managed by your administrator.
+        <p className="text-center text-xs text-slate-400 mt-6">
+          Staff and admin accounts are provisioned by your organization.
         </p>
-      </div>
+      </motion.div>
     </div>
   )
 }

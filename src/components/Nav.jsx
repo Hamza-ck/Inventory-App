@@ -1,111 +1,210 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { motion, AnimatePresence } from 'framer-motion'
+import { 
+  QrCode, 
+  LayoutDashboard, 
+  Boxes, 
+  Printer, 
+  LogOut, 
+  ShieldCheck, 
+  User, 
+  Menu, 
+  X,
+  UserPlus
+} from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import AddUserModal from './AddUserModal'
 
 export default function Nav() {
   const { isOwner, signOut, user } = useAuth()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isAddUserOpen, setIsAddUserOpen] = useState(false)
 
   return (
     <>
       {/* Top Header */}
-      <header className="app-header no-print">
-        <div className="header-brand">
-          <div className="brand-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="7" height="7" rx="1.5" />
-              <rect x="14" y="3" width="7" height="7" rx="1.5" />
-              <rect x="14" y="14" width="7" height="7" rx="1.5" />
-              <rect x="3" y="14" width="7" height="7" rx="1.5" />
-            </svg>
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-xs px-4 sm:px-6 py-3 no-print">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          {/* Logo & Brand */}
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-600/20">
+              <QrCode className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-extrabold text-slate-900 text-base sm:text-lg tracking-tight block leading-tight">
+                Inventory Scan
+              </span>
+              <span className="text-[10px] font-semibold text-slate-400 block tracking-wider uppercase">
+                Stock & Logistics
+              </span>
+            </div>
           </div>
-          <span>Inventory Scan</span>
-        </div>
 
-        {/* Desktop Navigation Links */}
-        <nav className="desktop-nav-links">
-          <NavLink to="/scan" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Scan
-          </NavLink>
-          {isOwner && (
-            <>
-              <NavLink to="/dashboard" className={({ isActive }) => (isActive ? 'active' : '')}>
-                Dashboard
-              </NavLink>
-              <NavLink to="/materials" className={({ isActive }) => (isActive ? 'active' : '')}>
-                Materials
-              </NavLink>
-              <NavLink to="/labels" className={({ isActive }) => (isActive ? 'active' : '')}>
-                Labels
-              </NavLink>
-            </>
-          )}
-        </nav>
+          {/* Desktop Navigation Links */}
+          <nav className="hidden md:flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
+            <NavLink
+              to="/scan"
+              className={({ isActive }) =>
+                `flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  isActive
+                    ? 'bg-white text-blue-600 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                }`
+              }
+            >
+              <QrCode className="w-4 h-4" />
+              <span>Scanner</span>
+            </NavLink>
 
-        <div className="header-right">
-          <span className={`user-badge ${isOwner ? 'owner' : 'employee'}`}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: isOwner ? '#2563eb' : '#10b981' }} />
-            {isOwner ? 'Owner' : 'Employee'}
-          </span>
-          <button 
-            type="button" 
-            className="btn-ghost" 
-            onClick={signOut} 
-            title="Sign out"
-            style={{ padding: '6px 10px', fontSize: '0.825rem' }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            <span className="desktop-nav-links">Sign out</span>
-          </button>
+            {isOwner && (
+              <>
+                <NavLink
+                  to="/dashboard"
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      isActive
+                        ? 'bg-white text-blue-600 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                    }`
+                  }
+                >
+                  <LayoutDashboard className="w-4 h-4" />
+                  <span>Dashboard</span>
+                </NavLink>
+
+                <NavLink
+                  to="/materials"
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      isActive
+                        ? 'bg-white text-blue-600 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                    }`
+                  }
+                >
+                  <Boxes className="w-4 h-4" />
+                  <span>Materials</span>
+                </NavLink>
+
+                <NavLink
+                  to="/labels"
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      isActive
+                        ? 'bg-white text-blue-600 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                    }`
+                  }
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Labels</span>
+                </NavLink>
+              </>
+            )}
+          </nav>
+
+          {/* Right Area: Role Badge & Action Buttons */}
+          <div className="flex items-center gap-2.5">
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setIsAddUserOpen(true)}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 transition-colors"
+                title="Add New User"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Add User</span>
+              </button>
+            )}
+
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
+                isOwner
+                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isOwner ? 'bg-blue-600' : 'bg-emerald-600'
+                }`}
+              />
+              {isOwner ? 'Owner' : 'Employee'}
+            </span>
+
+            <button
+              type="button"
+              onClick={signOut}
+              title="Sign out"
+              className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Mobile Bottom Navigation Bar */}
-      <nav className="bottom-nav no-print">
-        <NavLink to="/scan" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 7V5a2 2 0 0 1 2-2h2" />
-            <path d="M17 3h2a2 2 0 0 1 2 2v2" />
-            <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
-            <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
-            <rect x="7" y="7" width="10" height="10" rx="1" />
-          </svg>
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-slate-200/90 py-2 px-3 flex items-center justify-around shadow-2xl no-print">
+        <NavLink
+          to="/scan"
+          className={({ isActive }) =>
+            `flex flex-col items-center justify-center gap-1 px-3 py-1 rounded-xl text-[11px] font-bold transition-all flex-1 ${
+              isActive ? 'text-blue-600 scale-105' : 'text-slate-400 hover:text-slate-600'
+            }`
+          }
+        >
+          <QrCode className="w-5 h-5" />
           <span>Scan</span>
         </NavLink>
 
         {isOwner && (
           <>
-            <NavLink to="/dashboard" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <path d="M3 9h18" />
-                <path d="M9 21V9" />
-              </svg>
+            <NavLink
+              to="/dashboard"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center gap-1 px-3 py-1 rounded-xl text-[11px] font-bold transition-all flex-1 ${
+                  isActive ? 'text-blue-600 scale-105' : 'text-slate-400 hover:text-slate-600'
+                }`
+              }
+            >
+              <LayoutDashboard className="w-5 h-5" />
               <span>Dashboard</span>
             </NavLink>
 
-            <NavLink to="/materials" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                <line x1="12" y1="22.08" x2="12" y2="12" />
-              </svg>
+            <NavLink
+              to="/materials"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center gap-1 px-3 py-1 rounded-xl text-[11px] font-bold transition-all flex-1 ${
+                  isActive ? 'text-blue-600 scale-105' : 'text-slate-400 hover:text-slate-600'
+                }`
+              }
+            >
+              <Boxes className="w-5 h-5" />
               <span>Materials</span>
             </NavLink>
 
-            <NavLink to="/labels" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 6 2 18 2 18 9" />
-                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-                <rect x="6" y="14" width="12" height="8" />
-              </svg>
+            <NavLink
+              to="/labels"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center gap-1 px-3 py-1 rounded-xl text-[11px] font-bold transition-all flex-1 ${
+                  isActive ? 'text-blue-600 scale-105' : 'text-slate-400 hover:text-slate-600'
+                }`
+              }
+            >
+              <Printer className="w-5 h-5" />
               <span>Labels</span>
             </NavLink>
           </>
         )}
       </nav>
+
+      {/* Global Add User Modal for Owner */}
+      <AddUserModal
+        isOpen={isAddUserOpen}
+        onClose={() => setIsAddUserOpen(false)}
+      />
     </>
   )
 }
