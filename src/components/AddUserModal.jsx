@@ -22,32 +22,21 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }) {
     setLoading(true)
 
     try {
-      // Create user with Supabase Auth
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: email.trim(),
-        password: password,
-        options: {
-          data: {
-            full_name: fullName.trim(),
-            role: role,
-          },
+      const { data, error: invokeError } = await supabase.functions.invoke('create-user', {
+        body: {
+          email: email.trim(),
+          password,
+          fullName: fullName.trim(),
+          role,
         },
       })
 
-      if (signUpError) throw signUpError
+      if (invokeError) {
+        throw new Error(invokeError.message || 'Failed to create user')
+      }
 
-      const newUserId = data?.user?.id
-      if (newUserId) {
-        // Upsert profile record to ensure role and name are explicitly stored
-        const { error: profileError } = await supabase.from('profiles').upsert({
-          id: newUserId,
-          role: role,
-          full_name: fullName.trim() || email.split('@')[0],
-        })
-
-        if (profileError) {
-          console.warn('Profile update note:', profileError.message)
-        }
+      if (data?.error) {
+        throw new Error(data.error)
       }
 
       setSuccess(`User "${email.trim()}" created successfully with role "${role}"!`)

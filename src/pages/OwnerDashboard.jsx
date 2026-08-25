@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Package, 
@@ -12,12 +12,14 @@ import {
   RefreshCw, 
   Award, 
   Boxes, 
-  Layers,
-  Filter,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  X
+  Layers, 
+  Filter, 
+  CheckCircle2, 
+  XCircle, 
+  Clock, 
+  X,
+  ChevronRight,
+  ArrowRight
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import Nav from '../components/Nav'
@@ -29,8 +31,13 @@ export default function OwnerDashboard() {
   const [loading, setLoading] = useState(true)
   const [isAddUserOpen, setIsAddUserOpen] = useState(false)
 
-  // Search & Filter States
+  // Search & Live Dropdown States
   const [searchQuery, setSearchQuery] = useState('')
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
+  const [highlightedId, setHighlightedId] = useState(null)
+  const searchContainerRef = useRef(null)
+
+  // Filter States
   const [dateFilter, setDateFilter] = useState('all') // 'today' | 'yesterday' | '7days' | '30days' | 'all' | 'custom'
   const [customDate, setCustomDate] = useState(new Date().toISOString().slice(0, 10))
   const [directionFilter, setDirectionFilter] = useState('all') // 'all' | 'in' | 'out'
@@ -38,6 +45,26 @@ export default function OwnerDashboard() {
 
   useEffect(() => {
     load()
+  }, [])
+
+  // Close search dropdown on outside click or Escape key
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
+        setIsSearchFocused(false)
+      }
+    }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setIsSearchFocused(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
   }, [])
 
   async function load() {
@@ -199,6 +226,40 @@ export default function OwnerDashboard() {
     })
   }, [materials, searchQuery, stockStatusFilter])
 
+  // Smooth scroll and flash highlight helper
+  function scrollToElement(elementId, highlightKey) {
+    const el = document.getElementById(elementId)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      if (highlightKey) {
+        setHighlightedId(highlightKey)
+        setTimeout(() => setHighlightedId(null), 2500)
+      }
+    }
+  }
+
+  function handleSelectProductResult(product) {
+    setIsSearchFocused(false)
+    setStockStatusFilter('all')
+    setTimeout(() => {
+      scrollToElement(`product-card-${product.id}`, `product-${product.id}`)
+    }, 60)
+  }
+
+  function handleSelectTxResult(tx) {
+    setIsSearchFocused(false)
+    setDateFilter('all')
+    setDirectionFilter('all')
+    setTimeout(() => {
+      scrollToElement(`tx-item-${tx.id}`, `tx-${tx.id}`)
+    }, 60)
+  }
+
+  const showLiveResults = isSearchFocused && searchQuery.trim().length > 0
+  const topProductResults = filteredProducts.slice(0, 5)
+  const topTxResults = filteredTransactions.slice(0, 5)
+  const hasLiveResults = topProductResults.length > 0 || topTxResults.length > 0
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <Nav />
@@ -236,66 +297,233 @@ export default function OwnerDashboard() {
           </div>
         </div>
 
-        {/* Global Search Bar */}
-        <div className="relative mb-6">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-          <input
-            type="text"
-            placeholder='Search products or logs (e.g. "Model Name", "Product Name", "SKU")...'
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-10 py-2.5 sm:py-3 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 shadow-xs"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+        {/* Global Search Bar with Typeahead Dropdown */}
+        <div ref={searchContainerRef} className="relative mb-6 z-30">
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder='Search products or logs (e.g. "Model Name", "Product Name", "SKU")...'
+              value={searchQuery}
+              onFocus={() => setIsSearchFocused(true)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value)
+                setIsSearchFocused(true)
+              }}
+              className="w-full pl-10 pr-10 py-2.5 sm:py-3 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 shadow-xs"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('')
+                  setIsSearchFocused(false)
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Live Command Palette / Typeahead Results Dropdown */}
+          <AnimatePresence>
+            {showLiveResults && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.99 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 4, scale: 0.99 }}
+                transition={{ duration: 0.15 }}
+                className="absolute top-full left-0 right-0 mt-2 bg-white/98 backdrop-blur-md rounded-2xl border border-slate-200 shadow-2xl overflow-hidden max-h-96 overflow-y-auto"
+              >
+                {!hasLiveResults ? (
+                  <div className="p-6 text-center text-slate-500 text-xs">
+                    <p className="font-semibold text-slate-700">No matching products or activities</p>
+                    <p className="mt-1 text-slate-400">Try a different SKU, model variant or item name.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {/* Products Match Group */}
+                    {topProductResults.length > 0 && (
+                      <div className="p-2 sm:p-3">
+                        <div className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                          <span>Products ({filteredProducts.length})</span>
+                          <span className="text-[10px] font-normal lowercase">Click to view in stock list</span>
+                        </div>
+                        <div className="space-y-1 mt-1">
+                          {topProductResults.map((p) => {
+                            const isLow = Number(p.current_qty) <= Number(p.reorder_threshold ?? 0)
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => handleSelectProductResult(p)}
+                                className="w-full text-left flex items-center justify-between p-2.5 rounded-xl hover:bg-blue-50/70 hover:text-blue-900 transition-colors group"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-bold text-slate-900 group-hover:text-blue-700 text-xs sm:text-sm truncate">
+                                    {p.name}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                    <span className="font-mono bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                                      {p.sku}
+                                    </span>
+                                    {p.model && <span>• {p.model}</span>}
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0 pl-3">
+                                  <div className="font-bold text-xs sm:text-sm text-slate-900">
+                                    {p.current_qty} {p.unit || 'pcs'}
+                                  </div>
+                                  <span
+                                    className={`text-[10px] font-semibold ${
+                                      isLow ? 'text-amber-600' : 'text-emerald-600'
+                                    }`}
+                                  >
+                                    {isLow ? 'Low stock' : 'In stock'}
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recent Activity Match Group */}
+                    {topTxResults.length > 0 && (
+                      <div className="p-2 sm:p-3 bg-slate-50/50">
+                        <div className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                          <span>Recent Activity Logs ({filteredTransactions.length})</span>
+                          <span className="text-[10px] font-normal lowercase">Click to view in log</span>
+                        </div>
+                        <div className="space-y-1 mt-1">
+                          {topTxResults.map((tx) => {
+                            const isIn = tx.direction === 'in'
+                            const dateStr = new Date(tx.created_at).toLocaleDateString([], {
+                              month: 'short',
+                              day: 'numeric',
+                            })
+                            return (
+                              <button
+                                key={tx.id}
+                                type="button"
+                                onClick={() => handleSelectTxResult(tx)}
+                                className="w-full text-left flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 transition-colors group"
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                  <div
+                                    className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                                      isIn
+                                        ? 'bg-emerald-100 text-emerald-700'
+                                        : 'bg-rose-100 text-rose-700'
+                                    }`}
+                                  >
+                                    {isIn ? (
+                                      <ArrowDownCircle className="w-3.5 h-3.5" />
+                                    ) : (
+                                      <ArrowUpCircle className="w-3.5 h-3.5" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-semibold text-slate-900 group-hover:text-blue-700 text-xs truncate">
+                                      {tx.materials?.name || 'Item'}
+                                    </div>
+                                    <div className="text-[11px] text-slate-400">
+                                      {dateStr} • {tx.materials?.sku || 'SKU'}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0 pl-3">
+                                  <span
+                                    className={`font-bold text-xs ${
+                                      isIn ? 'text-emerald-600' : 'text-rose-600'
+                                    }`}
+                                  >
+                                    {isIn ? `+${tx.qty}` : `-${tx.qty}`} {tx.materials?.unit || 'pcs'}
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* Stats Grid */}
+        {/* Interactive Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
-          {/* Total SKUs */}
-          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between">
+          {/* Total SKUs Card (Clickable -> All Products) */}
+          <div
+            onClick={() => {
+              setStockStatusFilter('all')
+              scrollToElement('section-products')
+            }}
+            className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between cursor-pointer hover:border-blue-300 hover:shadow-md transition-all active:scale-[0.99] group"
+            title="Click to view all products"
+          >
             <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Total SKUs</span>
-              <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+              <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-blue-600 transition-colors">
+                Total SKUs
+              </span>
+              <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center transition-colors">
                 <Boxes className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">{materials.length}</div>
+            <div className="text-2xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+              {materials.length}
+            </div>
           </div>
 
-          {/* Total Units */}
-          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between">
+          {/* Total Units Card (Clickable -> All Products) */}
+          <div
+            onClick={() => {
+              setStockStatusFilter('all')
+              scrollToElement('section-products')
+            }}
+            className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all active:scale-[0.99] group"
+            title="Click to view total inventory breakdown"
+          >
             <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Total Units</span>
-              <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-indigo-600 transition-colors">
+                Total Units
+              </span>
+              <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white flex items-center justify-center transition-colors">
                 <Package className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">
+            <div className="text-2xl font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
               {totalStockUnits.toLocaleString()}
             </div>
           </div>
 
-          {/* Low Stock Alert */}
+          {/* Low Stock Alert Card (Clickable -> Filter Low Stock in Products) */}
           <div
-            className={`rounded-2xl p-4 sm:p-5 border shadow-xs flex flex-col justify-between transition-colors ${
+            onClick={() => {
+              setStockStatusFilter('low')
+              scrollToElement('section-products')
+            }}
+            className={`rounded-2xl p-4 sm:p-5 border shadow-xs flex flex-col justify-between cursor-pointer hover:shadow-md transition-all active:scale-[0.99] group ${
               lowStockItems.length > 0
-                ? 'bg-amber-50/70 border-amber-200 text-amber-900'
-                : 'bg-white border-slate-200/90'
+                ? 'bg-amber-50/70 border-amber-200 text-amber-900 hover:border-amber-400'
+                : 'bg-white border-slate-200/90 hover:border-slate-300'
             }`}
+            title="Click to filter low stock materials"
           >
             <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Low Stock</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-amber-800 transition-colors">
+                Low Stock
+              </span>
               <div
-                className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                  lowStockItems.length > 0 ? 'bg-amber-200/70 text-amber-800' : 'bg-slate-100 text-slate-500'
+                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                  lowStockItems.length > 0
+                    ? 'bg-amber-200/70 text-amber-800 group-hover:bg-amber-500 group-hover:text-white'
+                    : 'bg-slate-100 text-slate-500'
                 }`}
               >
                 <AlertTriangle className="w-4 h-4" />
@@ -310,15 +538,23 @@ export default function OwnerDashboard() {
             </div>
           </div>
 
-          {/* Total Moves */}
-          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between">
+          {/* Total Moves Card (Clickable -> Scroll to Transactions) */}
+          <div
+            onClick={() => scrollToElement('section-transactions')}
+            className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between cursor-pointer hover:border-emerald-300 hover:shadow-md transition-all active:scale-[0.99] group"
+            title="Click to view daily movements log"
+          >
             <div className="flex items-center justify-between text-slate-500 mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Total Moves</span>
-              <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-emerald-600 transition-colors">
+                Total Moves
+              </span>
+              <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white flex items-center justify-center transition-colors">
                 <TrendingUp className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">{transactions.length}</div>
+            <div className="text-2xl font-bold text-slate-900 group-hover:text-emerald-600 transition-colors">
+              {transactions.length}
+            </div>
           </div>
         </div>
 
@@ -443,7 +679,7 @@ export default function OwnerDashboard() {
         </div>
 
         {/* Section 1: Total Quantity of Each Product */}
-        <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/90 shadow-xs mb-6">
+        <div id="section-products" className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/90 shadow-xs mb-6 scroll-mt-20">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
             <div>
               <div className="flex items-center gap-2">
@@ -513,11 +749,17 @@ export default function OwnerDashboard() {
                 const threshold = Number(m.reorder_threshold ?? 0)
                 const isOut = qty <= 0
                 const isLow = !isOut && qty <= threshold
+                const isHighlighted = highlightedId === `product-${m.id}`
 
                 return (
                   <div
                     key={m.id}
-                    className="p-4 rounded-xl bg-slate-50 hover:bg-white border border-slate-200 hover:border-slate-300 hover:shadow-xs transition-all flex flex-col justify-between"
+                    id={`product-card-${m.id}`}
+                    className={`p-4 rounded-xl border transition-all duration-300 flex flex-col justify-between ${
+                      isHighlighted
+                        ? 'ring-4 ring-blue-500 bg-blue-50/70 border-blue-400 shadow-md scale-[1.01]'
+                        : 'bg-slate-50 hover:bg-white border-slate-200 hover:border-slate-300 hover:shadow-xs'
+                    }`}
                   >
                     <div>
                       <div className="flex items-start justify-between gap-2 mb-2">
@@ -585,7 +827,7 @@ export default function OwnerDashboard() {
         </div>
 
         {/* Section 2: Daily Log Movement with Date Filtration */}
-        <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/90 shadow-xs">
+        <div id="section-transactions" className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/90 shadow-xs scroll-mt-20">
           {/* Header & Date Controls */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
             <div>
@@ -728,11 +970,17 @@ export default function OwnerDashboard() {
                 const formattedTime = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 const formattedDate = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
                 const mat = tx.materials
+                const isHighlighted = highlightedId === `tx-${tx.id}`
 
                 return (
                   <div
                     key={tx.id}
-                    className="flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200/80 transition-colors"
+                    id={`tx-item-${tx.id}`}
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-all duration-300 ${
+                      isHighlighted
+                        ? 'ring-4 ring-blue-500 bg-blue-50/70 border-blue-400 shadow-md scale-[1.01]'
+                        : 'bg-slate-50 hover:bg-slate-100/80 border-slate-200/80'
+                    }`}
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div
