@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef, useEffect } from 'react'
+import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
@@ -14,15 +14,19 @@ import {
   Package, 
   Search,
   Sparkles,
-  Check
+  Check,
+  FileText
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import { db, addToQueue, updateQueueQty } from '../lib/db'
 import { submitQueue } from '../lib/sync'
+import { advancedFilterMaterials } from '../lib/searchUtils'
 import ScannerView from '../components/ScannerView'
 import QueueList from '../components/QueueList'
 import Nav from '../components/Nav'
+import AdvanceSearchModal from '../components/AdvanceSearchModal'
+import ProductReportModal from '../components/ProductReportModal'
 
 export default function ScanPage() {
   const { user, isOwner } = useAuth()
@@ -37,6 +41,16 @@ export default function ScanPage() {
   const [quickAdd, setQuickAdd] = useState({ name: '', model: '' })
   const [addingMaterial, setAddingMaterial] = useState(false)
   const [manualSku, setManualSku] = useState('')
+  const [isManualFocused, setIsManualFocused] = useState(false)
+  const manualSearchRef = useRef(null)
+
+  // Materials state for live advanced search
+  const [materials, setMaterials] = useState([])
+
+  // Modal states for Advance Search and Product Report
+  const [isAdvanceSearchOpen, setIsAdvanceSearchOpen] = useState(false)
+  const [isReportOpen, setIsReportOpen] = useState(false)
+  const [reportProduct, setReportProduct] = useState('')
 
   // Scanned item popup modal state (displays Model Name as h3 and Product Name as h5)
   const [scannedPopup, setScannedPopup] = useState(null)
@@ -49,8 +63,34 @@ export default function ScanPage() {
     isOwnerRef.current = isOwner
   }, [isOwner])
 
+  useEffect(() => {
+    loadMaterials()
+  }, [])
+
+  async function loadMaterials() {
+    const { data } = await supabase.from('materials').select('*').order('name')
+    if (data) setMaterials(data)
+  }
+
+  // Close live suggestions on outside click
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (manualSearchRef.current && !manualSearchRef.current.contains(event.target)) {
+        setIsManualFocused(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   const queueItems = useLiveQuery(() => db.queue.toArray(), []) || []
   const validItemsCount = queueItems.filter((i) => Number(i.qty) > 0).length
+
+  // Live advance search suggestions for employees & owners
+  const liveSuggestions = useMemo(() => {
+    if (!manualSku.trim()) return []
+    return advancedFilterMaterials(materials, manualSku.trim()).slice(0, 5)
+  }, [materials, manualSku])
 
   // Stable scan handler
   const handleScan = useCallback(async (rawSku) => {
@@ -122,6 +162,13 @@ export default function ScanPage() {
     if (!manualSku.trim()) return
     handleScan(manualSku.trim())
     setManualSku('')
+    setIsManualFocused(false)
+  }
+
+  function handleSelectSuggestion(m) {
+    handleScan(m.sku)
+    setManualSku('')
+    setIsManualFocused(false)
   }
 
   async function handleQuickAdd(e) {
@@ -162,6 +209,7 @@ export default function ScanPage() {
     setStatusType('success')
     setStatus(`✓ Registered "${quickAdd.name.trim()}" and added to queue`)
     setUnknownSku(null)
+    loadMaterials()
   }
 
   async function handleSubmit() {
@@ -207,7 +255,7 @@ export default function ScanPage() {
               <QrCode className="w-6 h-6 text-blue-600" />
               QR Scanner
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500">Scan barcodes or QR codes in real-time</p>
+            <p className="text-xs sm:text-sm text-slate-500">Scan barcodes or search models in real-time</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -229,7 +277,7 @@ export default function ScanPage() {
         </div>
 
         {/* Direction Segmented Toggle Buttons */}
-        <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-200/80 rounded-2xl border border-slate-300/60 mb-5 shadow-inner">
+        <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-200/80 rounded-2xl border border-slate-300/60 mb-4 shadow-inner">
           <button
             type="button"
             onClick={() => setDirection('in')}
@@ -260,26 +308,112 @@ export default function ScanPage() {
         {/* Camera Scanner View */}
         <ScannerView onScan={handleScan} />
 
-        {/* Manual SKU Input Form */}
-        <form onSubmit={handleManualSubmit} className="flex gap-2 mb-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Or type/paste SKU barcode manually..."
-              value={manualSku}
-              onChange={(e) => setManualSku(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-slate-300 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent shadow-sm"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={!manualSku.trim()}
-            className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 font-semibold text-sm rounded-xl border border-slate-300 shadow-sm active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5"
-          >
-            <Plus className="w-4 h-4" /> Add
-          </button>
-        </form>
+        {/* Advance Search & Live Barcode / Model Input for Employees */}
+        <div ref={manualSearchRef} className="relative mb-4 z-20">
+          <form onSubmit={handleManualSubmit} className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder='Search Model Name, Product or SKU (e.g. "2mm", "Vivo")...'
+                value={manualSku}
+                onFocus={() => setIsManualFocused(true)}
+                onChange={(e) => {
+                  setManualSku(e.target.value)
+                  setIsManualFocused(true)
+                }}
+                className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-slate-300 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent shadow-xs"
+              />
+              {manualSku && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualSku('')
+                    setIsManualFocused(false)
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={!manualSku.trim()}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-xs active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 shrink-0"
+            >
+              <Plus className="w-4 h-4" /> Add
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsAdvanceSearchOpen(true)}
+              className="px-3 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold text-xs rounded-xl shadow-xs transition-colors shrink-0 flex items-center gap-1"
+              title="Open full advance search palette"
+            >
+              <Search className="w-3.5 h-3.5 text-blue-600" />
+              <span className="hidden sm:inline">Search</span>
+            </button>
+          </form>
+
+          {/* Live Search Suggestions Dropdown */}
+          <AnimatePresence>
+            {isManualFocused && liveSuggestions.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 4 }}
+                className="absolute top-full left-0 right-0 mt-1.5 bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden divide-y divide-slate-100 z-30"
+              >
+                <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                  <span>Matching Models & Products</span>
+                  <span className="text-[10px] font-normal lowercase">Click to scan/queue</span>
+                </div>
+
+                {liveSuggestions.map((m) => {
+                  const qty = Number(m.current_qty) || 0
+                  const isLow = qty <= Number(m.reorder_threshold ?? 0)
+
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => handleSelectSuggestion(m)}
+                      className="w-full p-3 text-left hover:bg-blue-50/70 transition-colors flex items-center justify-between gap-3 group"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-extrabold text-slate-900 group-hover:text-blue-700 text-xs sm:text-sm truncate">
+                          {m.model || m.name}
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                          <span className="font-medium text-slate-700">{m.name}</span>
+                          <span>•</span>
+                          <span className="font-mono bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                            {m.sku}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0 pl-2">
+                        <div className="font-black text-xs sm:text-sm text-slate-900">
+                          {qty.toLocaleString()} {m.unit || 'pcs'}
+                        </div>
+                        <span
+                          className={`text-[10px] font-semibold ${
+                            isLow ? 'text-amber-600' : 'text-emerald-600'
+                          }`}
+                        >
+                          {isLow ? 'Low stock' : 'In stock'}
+                        </span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* Status Toast Banner */}
         <AnimatePresence>
@@ -565,6 +699,29 @@ export default function ScanPage() {
           </motion.div>
         )}
       </main>
+
+      {/* Advance Search Modal */}
+      <AdvanceSearchModal
+        isOpen={isAdvanceSearchOpen}
+        onClose={() => setIsAdvanceSearchOpen(false)}
+        materials={materials}
+        onSelectProductForReport={(pName) => {
+          setReportProduct(pName)
+          setIsReportOpen(true)
+        }}
+        onItemAddedToQueue={(m, dir) => {
+          setStatusType('success')
+          setStatus(`Added "${m.model || m.name}" to ${dir === 'in' ? 'Inward' : 'Outward'} queue`)
+        }}
+      />
+
+      {/* Product Report Modal */}
+      <ProductReportModal
+        isOpen={isReportOpen}
+        onClose={() => setIsReportOpen(false)}
+        materials={materials}
+        initialProductName={reportProduct}
+      />
     </div>
   )
 }

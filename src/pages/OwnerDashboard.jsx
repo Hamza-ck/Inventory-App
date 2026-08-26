@@ -21,17 +21,22 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
-  SlidersHorizontal
+  SlidersHorizontal,
+  FileText
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
+import { advancedFilterMaterials } from '../lib/searchUtils'
 import Nav from '../components/Nav'
 import AddUserModal from '../components/AddUserModal'
+import ProductReportModal from '../components/ProductReportModal'
 
 export default function OwnerDashboard() {
   const [materials, setMaterials] = useState([])
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(true)
   const [isAddUserOpen, setIsAddUserOpen] = useState(false)
+  const [isReportOpen, setIsReportOpen] = useState(false)
+  const [reportProduct, setReportProduct] = useState('')
 
   // Search & Live Dropdown States
   const [searchQuery, setSearchQuery] = useState('')
@@ -212,23 +217,10 @@ export default function OwnerDashboard() {
 
   const topProduct = topProducts[0] || null
 
-  // 5. Search & Filter Individual Products List
+  // 5. Search & Filter Individual Products with Advance Multi-Token Logic
   const filteredProducts = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim()
-    return materials.filter((m) => {
-      const nameMatch = m.name?.toLowerCase().includes(q)
-      const modelMatch = m.model?.toLowerCase().includes(q)
-      const skuMatch = m.sku?.toLowerCase().includes(q)
-      const matchesSearch = !q || nameMatch || modelMatch || skuMatch
-
-      let matchesStock = true
-      if (stockStatusFilter === 'low') {
-        matchesStock = Number(m.current_qty) > 0 && Number(m.current_qty) <= Number(m.reorder_threshold ?? 0)
-      } else if (stockStatusFilter === 'out') {
-        matchesStock = Number(m.current_qty) <= 0
-      }
-
-      return matchesSearch && matchesStock
+    return advancedFilterMaterials(materials, searchQuery, {
+      statusFilter: stockStatusFilter,
     })
   }, [materials, searchQuery, stockStatusFilter])
 
@@ -294,6 +286,11 @@ export default function OwnerDashboard() {
     setExpandedOrigins(new Set())
   }
 
+  function handleOpenReport(productName) {
+    setReportProduct(productName || '')
+    setIsReportOpen(true)
+  }
+
   // Smooth scroll and flash highlight helper
   function scrollToElement(elementId, highlightKey) {
     const el = document.getElementById(elementId)
@@ -310,7 +307,6 @@ export default function OwnerDashboard() {
     setIsSearchFocused(false)
     setStockStatusFilter('all')
     setSelectedOriginProduct('all')
-    // Make sure the origin product accordion is expanded
     setExpandedOrigins((prev) => new Set([...prev, product.name?.trim()]))
     setTimeout(() => {
       scrollToElement(`product-card-${product.id}`, `product-${product.id}`)
@@ -347,14 +343,25 @@ export default function OwnerDashboard() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {/* Marketing Available Stock Report Header Button */}
+            <button
+              type="button"
+              onClick={() => handleOpenReport('')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-xs sm:text-sm rounded-xl border border-amber-200 shadow-xs transition-all"
+              title="Generate Marketing Available Stock Report (PDF / Copy)"
+            >
+              <Megaphone className="w-4 h-4 text-amber-600" />
+              <span>Available Stock Report</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setIsAddUserOpen(true)}
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-sm transition-all"
             >
               <UserPlus className="w-4 h-4" />
-              <span>Add New User</span>
+              <span>Add User</span>
             </button>
 
             <button
@@ -374,7 +381,7 @@ export default function OwnerDashboard() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             <input
               type="text"
-              placeholder='Search products or logs (e.g. "Model Name", "Product Name", "SKU")...'
+              placeholder='Search products or logs with advance multi-keyword logic (e.g. "Vivo 2mm", "Shirt L", "SKU")...'
               value={searchQuery}
               onFocus={() => setIsSearchFocused(true)}
               onChange={(e) => {
@@ -433,13 +440,14 @@ export default function OwnerDashboard() {
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="font-bold text-slate-900 group-hover:text-blue-700 text-xs sm:text-sm truncate">
-                                    {p.name}
+                                    {p.model || p.name}
                                   </div>
                                   <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                    <span className="font-medium text-slate-700">{p.name}</span>
+                                    <span>•</span>
                                     <span className="font-mono bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
                                       {p.sku}
                                     </span>
-                                    {p.model && <span>• {p.model}</span>}
                                   </div>
                                 </div>
                                 <div className="text-right shrink-0 pl-3">
@@ -888,8 +896,8 @@ export default function OwnerDashboard() {
                         </div>
                       </div>
 
-                      {/* Right Total and Dropdown Trigger */}
-                      <div className="flex items-center gap-3 shrink-0 pl-2">
+                      {/* Right Total, Report Trigger and Dropdown Trigger */}
+                      <div className="flex items-center gap-2.5 shrink-0 pl-2">
                         <div className="text-right">
                           <div className="text-[10px] uppercase font-bold text-slate-400">Total Origin Stock</div>
                           <div className="text-sm sm:text-base font-black text-slate-900">
@@ -1225,6 +1233,14 @@ export default function OwnerDashboard() {
         onUserAdded={() => {
           // reload if needed
         }}
+      />
+
+      {/* Product Report Modal */}
+      <ProductReportModal
+        isOpen={isReportOpen}
+        onClose={() => setIsReportOpen(false)}
+        materials={materials}
+        initialProductName={reportProduct}
       />
     </div>
   )

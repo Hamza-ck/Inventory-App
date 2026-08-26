@@ -17,10 +17,14 @@ import {
   AlertCircle, 
   Check, 
   FileText,
-  FileDown
+  FileDown,
+  RotateCcw,
+  Megaphone
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
+import { advancedFilterMaterials } from '../lib/searchUtils'
 import Nav from '../components/Nav'
+import ProductReportModal from '../components/ProductReportModal'
 
 const emptyForm = { sku: '', name: '', model: '', unit: 'pcs', current_qty: 0, reorder_threshold: 5 }
 
@@ -34,6 +38,14 @@ export default function MaterialsPage() {
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
   const [filterLowStockOnly, setFilterLowStockOnly] = useState(false)
+
+  // Marketing Report Modal State
+  const [isReportOpen, setIsReportOpen] = useState(false)
+
+  // Erase All Quantities Safety Modal State
+  const [isEraseModalOpen, setIsEraseModalOpen] = useState(false)
+  const [erasing, setErasing] = useState(false)
+  const [toastMessage, setToastMessage] = useState(null)
 
   // Excel Bulk Import States
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
@@ -82,6 +94,28 @@ export default function MaterialsPage() {
     setError(null)
   }
 
+  // --- Reset / Erase All Quantities to 0 ---
+  async function handleEraseAllQuantities() {
+    setErasing(true)
+    try {
+      const { error: updateError } = await supabase
+        .from('materials')
+        .update({ current_qty: 0 })
+        .not('id', 'is', null)
+
+      if (updateError) throw updateError
+
+      setIsEraseModalOpen(false)
+      setToastMessage('✓ Successfully reset stock quantities of all products to 0.')
+      setTimeout(() => setToastMessage(null), 4000)
+      load()
+    } catch (err) {
+      alert(`Could not reset quantities: ${err.message}`)
+    } finally {
+      setErasing(false)
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError(null)
@@ -123,60 +157,44 @@ export default function MaterialsPage() {
   function downloadSampleFile() {
     const sampleData = [
       {
-        sku: 'SKU-SHIRT-001',
-        name: 'Cotton Crew Neck T-Shirt',
-        model: 'White / L',
+        sku: 'SKU-2MM-V40E',
+        name: '2MM',
+        model: 'VIVO V40 E',
         unit: 'pcs',
         current_qty: 50,
         reorder_threshold: 10,
       },
       {
-        sku: 'SKU-SHIRT-002',
-        name: 'Cotton Crew Neck T-Shirt',
-        model: 'Black / XL',
+        sku: 'SKU-2MM-V29',
+        name: '2MM',
+        model: 'VIVO V29',
         unit: 'pcs',
         current_qty: 30,
         reorder_threshold: 10,
       },
       {
-        sku: 'SKU-MOUSE-003',
-        name: 'Wireless Bluetooth Mouse',
-        model: 'M330 Silent Black',
+        sku: 'SKU-2MM-OP15',
+        name: '2MM',
+        model: 'OPPO A15C',
         unit: 'pcs',
         current_qty: 25,
         reorder_threshold: 5,
       },
       {
-        sku: 'SKU-CABLE-004',
-        name: 'USB-C Fast Charging Cable',
-        model: '2 Meter Braided',
+        sku: 'SKU-MAG-IP15P',
+        name: 'Clear Magsafe',
+        model: 'IPHONE 15 PRO',
         unit: 'pcs',
-        current_qty: 100,
-        reorder_threshold: 20,
-      },
-      {
-        sku: 'SKU-CASE-005',
-        name: 'Shockproof Matte Phone Case',
-        model: 'iPhone 15 Pro',
-        unit: 'pcs',
-        current_qty: 45,
-        reorder_threshold: 15,
-      },
-      {
-        sku: 'SKU-BOX-006',
-        name: 'Corrugated Shipping Box',
-        model: 'Medium 12x10x8',
-        unit: 'box',
-        current_qty: 200,
-        reorder_threshold: 50,
+        current_qty: 40,
+        reorder_threshold: 10,
       },
     ]
 
     const ws = XLSX.utils.json_to_sheet(sampleData)
     ws['!cols'] = [
       { wch: 18 },
-      { wch: 32 },
-      { wch: 20 },
+      { wch: 22 },
+      { wch: 22 },
       { wch: 10 },
       { wch: 14 },
       { wch: 18 },
@@ -232,7 +250,6 @@ export default function MaterialsPage() {
           return
         }
 
-        // Normalize and parse headers case-insensitively
         const seenSkus = new Map()
         let errCount = 0
         let warnCount = 0
@@ -271,7 +288,6 @@ export default function MaterialsPage() {
             isError = true
           }
 
-          // Duplicate SKU check inside uploaded file
           if (sku) {
             if (seenSkus.has(sku)) {
               issues.push(`Duplicate SKU in file (row ${seenSkus.get(sku) + 1} & row ${index + 1})`)
@@ -358,7 +374,6 @@ export default function MaterialsPage() {
       skippedRows: skipped,
     })
 
-    // Refresh materials list
     load()
   }
 
@@ -372,16 +387,8 @@ export default function MaterialsPage() {
   }
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim()
-    return materials.filter((m) => {
-      const matchesSearch =
-        !q ||
-        m.name?.toLowerCase().includes(q) ||
-        m.sku?.toLowerCase().includes(q) ||
-        (m.model && m.model.toLowerCase().includes(q))
-      const matchesLowStock =
-        !filterLowStockOnly || Number(m.current_qty) <= Number(m.reorder_threshold ?? 0)
-      return matchesSearch && matchesLowStock
+    return advancedFilterMaterials(materials, search, {
+      statusFilter: filterLowStockOnly ? 'low' : 'all',
     })
   }, [materials, search, filterLowStockOnly])
 
@@ -403,22 +410,22 @@ export default function MaterialsPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-            {/* Download Sample File Quick Button */}
+            {/* Marketing Report Header Button */}
             <button
               type="button"
-              onClick={downloadSampleFile}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs transition-all"
-              title="Download pre-filled sample spreadsheet (.xlsx)"
+              onClick={() => setIsReportOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-xs sm:text-sm rounded-xl border border-amber-200 shadow-xs transition-all"
+              title="Generate Marketing Available Stock Report (PDF / Copy)"
             >
-              <FileDown className="w-4 h-4 text-emerald-600" />
-              <span>Sample Excel</span>
+              <Megaphone className="w-4 h-4 text-amber-600" />
+              <span>Available Stock Report</span>
             </button>
 
             {/* Import from Excel Button */}
             <button
               type="button"
               onClick={() => setIsImportModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-sm transition-all"
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-sm transition-all"
             >
               <FileSpreadsheet className="w-4 h-4" />
               <span>Import Excel</span>
@@ -428,13 +435,48 @@ export default function MaterialsPage() {
             <button
               type="button"
               onClick={startAdd}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-sm transition-all"
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-sm transition-all"
             >
               <Plus className="w-4 h-4" />
               <span>Add SKU</span>
             </button>
+
+            {/* Erase / Reset All Quantities to 0 Button */}
+            <button
+              type="button"
+              onClick={() => setIsEraseModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-rose-50 text-rose-700 hover:text-rose-800 font-semibold text-xs sm:text-sm rounded-xl border border-rose-200 shadow-xs transition-all"
+              title="Erase / Reset all stock quantities to 0"
+            >
+              <RotateCcw className="w-4 h-4 text-rose-600" />
+              <span>Reset All Qty</span>
+            </button>
           </div>
         </div>
+
+        {/* Success Toast Notification */}
+        <AnimatePresence>
+          {toastMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs sm:text-sm font-semibold mb-5 flex items-center justify-between shadow-xs"
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>{toastMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setToastMessage(null)}
+                className="p-1 text-emerald-600 hover:text-emerald-900"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Search & Filter Bar */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
@@ -442,7 +484,7 @@ export default function MaterialsPage() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             <input
               type="text"
-              placeholder="Search by Product Name, Model, or SKU..."
+              placeholder="Search with advance multi-keyword logic by Product Name, Model, or SKU..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 shadow-xs"
@@ -586,6 +628,63 @@ export default function MaterialsPage() {
                     </button>
                   </div>
                 </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Modal for Reset / Erase All Quantities */}
+        <AnimatePresence>
+          {isEraseModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-md shadow-2xl border border-rose-200 text-center"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4 border border-rose-100 shadow-sm">
+                  <RotateCcw className="w-7 h-7" />
+                </div>
+
+                <h3 className="text-lg font-bold text-slate-900 mb-2">
+                  Erase All Stock Quantities?
+                </h3>
+
+                <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+                  This action will set the current stock quantity of <strong className="text-slate-800">ALL {materials.length} products</strong> to <strong>0</strong>.
+                  <br />
+                  Product names, model variants and SKUs will remain intact.
+                </p>
+
+                <div className="flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleEraseAllQuantities}
+                    disabled={erasing}
+                    className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-rose-600/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {erasing ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Resetting to 0...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Yes, Reset All to 0</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsEraseModalOpen(false)}
+                    className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs sm:text-sm rounded-xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </motion.div>
             </div>
           )}
@@ -887,7 +986,7 @@ export default function MaterialsPage() {
                         {m.sku}
                       </span>
                       {m.model && (
-                        <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                        <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-semibold">
                           {m.model}
                         </span>
                       )}
@@ -915,7 +1014,7 @@ export default function MaterialsPage() {
                       <button
                         type="button"
                         onClick={() => startEdit(m)}
-                        className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5"
+                        className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5"
                       >
                         <Edit3 className="w-3.5 h-3.5" /> Edit
                       </button>
@@ -935,6 +1034,13 @@ export default function MaterialsPage() {
           </div>
         )}
       </main>
+
+      {/* Marketing Product Report Modal */}
+      <ProductReportModal
+        isOpen={isReportOpen}
+        onClose={() => setIsReportOpen(false)}
+        materials={materials}
+      />
     </div>
   )
 }
