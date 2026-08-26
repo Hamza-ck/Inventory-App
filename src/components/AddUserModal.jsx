@@ -42,7 +42,7 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }) {
     try {
       let createdViaEdgeFunction = false
 
-      // 1. Try Edge Function first
+      // 1. Try Edge Function first if deployed
       try {
         const { data: edgeData, error: edgeError } = await supabase.functions.invoke('create-user', {
           body: {
@@ -79,12 +79,16 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }) {
 
         const newUserId = signUpData?.user?.id
         if (newUserId) {
-          // Attempt upserting profile using owner's authenticated client
-          await supabase.from('profiles').upsert({
-            id: newUserId,
-            role: role,
-            full_name: cleanName || cleanEmail.split('@')[0],
-          }).catch(() => {})
+          try {
+            // Upsert profile with owner's authenticated client
+            await supabase.from('profiles').upsert({
+              id: newUserId,
+              role: role,
+              full_name: cleanName || cleanEmail.split('@')[0],
+            })
+          } catch {
+            // Trigger in schema will auto-populate profile from raw_user_meta_data
+          }
         }
       }
 
@@ -95,7 +99,11 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }) {
       setRole('employee')
       if (onUserAdded) onUserAdded()
     } catch (err) {
-      setError(err.message || 'Failed to create user account. Please check credentials and try again.')
+      let msg = err.message || 'Failed to create user account. Please check credentials and try again.'
+      if (msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('security purposes')) {
+        msg = msg.replace('For security purposes, you can only request this', 'Please wait')
+      }
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -135,7 +143,7 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }) {
               <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="e.g. Sarah Jenkins"
+                placeholder="e.g. Kamran"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
