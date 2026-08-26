@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { UserPlus, X, Mail, Lock, User, Shield, CheckCircle2, AlertCircle, Eye, EyeOff } from 'lucide-react'
+import { UserPlus, X, Mail, Lock, User, CheckCircle2, AlertCircle, Eye, EyeOff } from 'lucide-react'
+import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabaseClient'
 
 export default function AddUserModal({ isOpen, onClose, onUserAdded }) {
@@ -13,6 +14,20 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }) {
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
 
+  // Isolated client instance with persistSession: false so it never touches the owner's active session
+  const isolatedClient = useMemo(() => {
+    const rawUrl = import.meta.env.VITE_SUPABASE_URL || ''
+    const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '')
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    })
+  }, [])
+
   if (!isOpen) return null
 
   async function handleSubmit(e) {
@@ -21,32 +36,66 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }) {
     setSuccess(null)
     setLoading(true)
 
+    const cleanEmail = email.trim()
+    const cleanName = fullName.trim()
+
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke('create-user', {
-        body: {
-          email: email.trim(),
-          password,
-          fullName: fullName.trim(),
-          role,
-        },
-      })
+      let createdViaEdgeFunction = false
 
-      if (invokeError) {
-        throw new Error(invokeError.message || 'Failed to create user')
+      // 1. Try Edge Function first
+      try {
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke('create-user', {
+          body: {
+            email: cleanEmail,
+            password,
+            fullName: cleanName,
+            role,
+          },
+        })
+
+        if (!edgeError && edgeData && !edgeData.error) {
+          createdViaEdgeFunction = true
+        }
+      } catch {
+        // Edge function not deployed or endpoint unreachable; proceed to isolated client fallback
       }
 
-      if (data?.error) {
-        throw new Error(data.error)
+      // 2. Fallback to isolated client signup (zero risk of owner logout)
+      if (!createdViaEdgeFunction) {
+        const { data: signUpData, error: signUpError } = await isolatedClient.auth.signUp({
+          email: cleanEmail,
+          password: password,
+          options: {
+            data: {
+              full_name: cleanName || cleanEmail.split('@')[0],
+              role: role,
+            },
+          },
+        })
+
+        if (signUpError) {
+          throw new Error(signUpError.message)
+        }
+
+        const newUserId = signUpData?.user?.id
+        if (newUserId) {
+          // Attempt upserting profile using owner's authenticated client
+          await supabase.from('profiles').upsert({
+            id: newUserId,
+            role: role,
+            full_name: cleanName || cleanEmail.split('@')[0],
+          }).catch(() => {})
+        }
       }
 
-      setSuccess(`User "${email.trim()}" created successfully with role "${role}"!`)
+      setSuccess(`User "${cleanEmail}" created successfully with role "${role === 'owner' ? 'Owner / Admin' : 'Employee'}"!`)
       setEmail('')
       setPassword('')
       setFullName('')
       setRole('employee')
       if (onUserAdded) onUserAdded()
     } catch (err) {
-      setError(err.message || 'Failed to create user. Please try again.')
+      setError(err.message || 'Failed to create user account. Please check credentials and try again.')
     } finally {
       setLoading(false)
     }

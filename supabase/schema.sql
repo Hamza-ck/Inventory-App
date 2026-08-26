@@ -1,7 +1,7 @@
 -- Run this once in the Supabase SQL editor for your project.
 
 -- 1. Profiles: extends auth.users with a role
-create table public.profiles (
+create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
   role text not null default 'employee' check (role in ('owner', 'employee')),
   full_name text,
@@ -9,7 +9,7 @@ create table public.profiles (
 );
 
 -- 2. Materials: one row per QR code / SKU
-create table public.materials (
+create table if not exists public.materials (
   id uuid primary key default gen_random_uuid(),
   sku text unique not null,
   name text not null,
@@ -21,7 +21,7 @@ create table public.materials (
 );
 
 -- 3. Transactions: the inward/outward ledger
-create table public.transactions (
+create table if not exists public.transactions (
   id uuid primary key default gen_random_uuid(),
   material_id uuid references public.materials(id) not null,
   qty numeric not null check (qty > 0),
@@ -38,6 +38,11 @@ alter table public.transactions enable row level security;
 
 create policy "read own profile" on public.profiles
   for select using (auth.uid() = id);
+
+create policy "owner reads and manages all profiles" on public.profiles
+  for all using (
+    exists (select 1 from public.profiles where id = auth.uid() and role = 'owner')
+  );
 
 create policy "materials readable by any signed in user" on public.materials
   for select using (auth.role() = 'authenticated');
@@ -73,22 +78,28 @@ begin
 end;
 $$ language plpgsql security definer;
 
+drop trigger if exists trg_apply_transaction on public.transactions;
 create trigger trg_apply_transaction
 after insert on public.transactions
 for each row execute function public.apply_transaction();
 
--- auto-create a profile (default role: employee) whenever a new user signs up
+-- auto-create or update profile with chosen role whenever a new user signs up
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, role) values (new.id, 'employee');
+  insert into public.profiles (id, role, full_name) values (
+    new.id, 
+    coalesce(new.raw_user_meta_data->>'role', 'employee'),
+    coalesce(new.raw_user_meta_data->>'full_name', '')
+  )
+  on conflict (id) do update set
+    role = coalesce(excluded.role, public.profiles.role),
+    full_name = coalesce(excluded.full_name, public.profiles.full_name);
   return new;
 end;
 $$ language plpgsql security definer;
 
+drop trigger if exists trg_handle_new_user on auth.users;
 create trigger trg_handle_new_user
 after insert on auth.users
 for each row execute function public.handle_new_user();
-
--- To make yourself the owner after signing up once through the app:
--- update public.profiles set role = 'owner' where id = '<your-user-id-from-auth.users>';

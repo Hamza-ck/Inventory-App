@@ -5,6 +5,7 @@ import {
   ArrowDownCircle, 
   ArrowUpCircle, 
   Plus, 
+  Minus,
   UploadCloud, 
   CheckCircle2, 
   AlertTriangle, 
@@ -12,11 +13,12 @@ import {
   QrCode, 
   Package, 
   Search,
-  Sparkles
+  Sparkles,
+  Check
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
-import { db, addToQueue } from '../lib/db'
+import { db, addToQueue, updateQueueQty } from '../lib/db'
 import { submitQueue } from '../lib/sync'
 import ScannerView from '../components/ScannerView'
 import QueueList from '../components/QueueList'
@@ -36,6 +38,9 @@ export default function ScanPage() {
   const [addingMaterial, setAddingMaterial] = useState(false)
   const [manualSku, setManualSku] = useState('')
 
+  // Scanned item popup modal state (displays Model Name as h3 and Product Name as h5)
+  const [scannedPopup, setScannedPopup] = useState(null)
+
   useEffect(() => {
     directionRef.current = direction
   }, [direction])
@@ -47,22 +52,39 @@ export default function ScanPage() {
   const queueItems = useLiveQuery(() => db.queue.toArray(), []) || []
   const validItemsCount = queueItems.filter((i) => Number(i.qty) > 0).length
 
-  // Stable scan handler that doesn't need to be recreated on direction change
+  // Stable scan handler
   const handleScan = useCallback(async (rawSku) => {
     const sku = rawSku.trim()
     if (!sku) return
     const currentDirection = directionRef.current
     const ownerStatus = isOwnerRef.current
 
-    let name = null
+    let materialData = null
     try {
-      const { data } = await supabase.from('materials').select('name').eq('sku', sku).single()
-      name = data?.name ?? null
-      if (name) await db.materialsCache.put({ sku, name, updatedAt: new Date().toISOString() })
+      const { data } = await supabase
+        .from('materials')
+        .select('name, model, unit, current_qty')
+        .eq('sku', sku)
+        .single()
+      materialData = data
+      if (data?.name) {
+        await db.materialsCache.put({ 
+          sku, 
+          name: data.name, 
+          model: data.model || '',
+          updatedAt: new Date().toISOString() 
+        })
+      }
     } catch {
       const cached = await db.materialsCache.get(sku)
-      name = cached?.name ?? null
+      if (cached?.name) {
+        materialData = { name: cached.name, model: cached.model || '' }
+      }
     }
+
+    const name = materialData?.name ?? null
+    const model = materialData?.model ?? ''
+    const unit = materialData?.unit ?? 'pcs'
 
     if (!name && ownerStatus) {
       setUnknownSku(sku)
@@ -72,13 +94,26 @@ export default function ScanPage() {
       return
     }
 
-    await addToQueue({ sku, name, direction: currentDirection })
+    // Add to queue
+    const queueId = await addToQueue({ sku, name, direction: currentDirection })
+
+    // Trigger visual pop-up modal showing Model Name (h3) and Product Name (h5)
+    setScannedPopup({
+      queueId,
+      sku,
+      name: name || 'Unregistered Product',
+      model: model || 'Standard Model',
+      unit,
+      direction: currentDirection,
+      qty: 1,
+    })
+
     if (name) {
       setStatusType('success')
-      setStatus(`Added "${name}" to queue (${currentDirection === 'in' ? 'Inward / Stock In' : 'Outward / Stock Out'})`)
+      setStatus(`Scanned: "${model || name}" (${currentDirection === 'in' ? 'Inward' : 'Outward'})`)
     } else {
       setStatusType('warning')
-      setStatus(`Added unregistered SKU (${sku}) — ask owner to register before syncing`)
+      setStatus(`Added unregistered SKU (${sku})`)
     }
   }, [])
 
@@ -108,9 +143,22 @@ export default function ScanPage() {
     await db.materialsCache.put({
       sku: unknownSku,
       name: quickAdd.name.trim(),
+      model: quickAdd.model.trim() || '',
       updatedAt: new Date().toISOString(),
     })
-    await addToQueue({ sku: unknownSku, name: quickAdd.name.trim(), direction })
+    const queueId = await addToQueue({ sku: unknownSku, name: quickAdd.name.trim(), direction })
+    
+    // Show popup
+    setScannedPopup({
+      queueId,
+      sku: unknownSku,
+      name: quickAdd.name.trim(),
+      model: quickAdd.model.trim() || 'Standard Model',
+      unit: 'pcs',
+      direction,
+      qty: 1,
+    })
+
     setStatusType('success')
     setStatus(`✓ Registered "${quickAdd.name.trim()}" and added to queue`)
     setUnknownSku(null)
@@ -138,6 +186,15 @@ export default function ScanPage() {
     }
   }
 
+  function adjustPopupQty(delta) {
+    if (!scannedPopup) return
+    const nextQty = Math.max(1, (Number(scannedPopup.qty) || 1) + delta)
+    setScannedPopup({ ...scannedPopup, qty: nextQty })
+    if (scannedPopup.queueId) {
+      updateQueueQty(scannedPopup.queueId, String(nextQty))
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <Nav />
@@ -150,7 +207,7 @@ export default function ScanPage() {
               <QrCode className="w-6 h-6 text-blue-600" />
               QR Scanner
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500">Scan shelf barcodes or items in real-time</p>
+            <p className="text-xs sm:text-sm text-slate-500">Scan barcodes or QR codes in real-time</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -209,7 +266,7 @@ export default function ScanPage() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Or type/paste SKU manually..."
+              placeholder="Or type/paste SKU barcode manually..."
               value={manualSku}
               onChange={(e) => setManualSku(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-slate-300 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent shadow-sm"
@@ -257,6 +314,122 @@ export default function ScanPage() {
                 <X className="w-4 h-4" />
               </button>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ======================================================== */}
+        {/* SCAN POP-UP: Shows Model Name(h3) & Product Name(h5)     */}
+        {/* ======================================================== */}
+        <AnimatePresence>
+          {scannedPopup && (
+            <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.92, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.92, y: 20 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+                className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-sm shadow-2xl border border-slate-200 text-center relative overflow-hidden"
+              >
+                {/* Close Button */}
+                <button
+                  type="button"
+                  onClick={() => setScannedPopup(null)}
+                  className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                {/* Scan Direction Badge & Icon */}
+                <div
+                  className={`mx-auto w-14 h-14 rounded-2xl flex items-center justify-center mb-3 shadow-md ${
+                    scannedPopup.direction === 'in'
+                      ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                      : 'bg-rose-100 text-rose-700 border border-rose-200'
+                  }`}
+                >
+                  {scannedPopup.direction === 'in' ? (
+                    <ArrowDownCircle className="w-8 h-8" />
+                  ) : (
+                    <ArrowUpCircle className="w-8 h-8" />
+                  )}
+                </div>
+
+                <div className="mb-1">
+                  <span
+                    className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+                      scannedPopup.direction === 'in'
+                        ? 'bg-emerald-50 text-emerald-800'
+                        : 'bg-rose-50 text-rose-800'
+                    }`}
+                  >
+                    {scannedPopup.direction === 'in' ? 'Stock Inward' : 'Stock Outward'}
+                  </span>
+                </div>
+
+                {/* MODEL NAME as <h3> */}
+                <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight mt-1 mb-0.5">
+                  {scannedPopup.model || 'Standard Variant / Model'}
+                </h3>
+
+                {/* PRODUCT NAME as <h5> */}
+                <h5 className="text-sm font-semibold text-slate-500 mb-4">
+                  {scannedPopup.name}
+                </h5>
+
+                {/* Quantity Stepper Controller */}
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 mb-4">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase mb-2">
+                    Scanned Quantity ({scannedPopup.unit || 'pcs'})
+                  </div>
+
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => adjustPopupQty(-1)}
+                      className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center text-slate-700 font-bold hover:bg-slate-100 active:scale-95 transition-all"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+
+                    <div className="w-16 text-center font-black text-2xl text-slate-900">
+                      {scannedPopup.qty}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => adjustPopupQty(1)}
+                      className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center text-slate-700 font-bold hover:bg-slate-100 active:scale-95 transition-all"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Preset chips */}
+                  <div className="flex items-center justify-center gap-2 mt-2.5">
+                    {[5, 10, 25, 50].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => adjustPopupQty(num)}
+                        className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors"
+                      >
+                        +{num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action button */}
+                <button
+                  type="button"
+                  onClick={() => setScannedPopup(null)}
+                  className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-600/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Done / Scan Next</span>
+                </button>
+              </motion.div>
+            </div>
           )}
         </AnimatePresence>
 

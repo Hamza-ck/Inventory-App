@@ -18,8 +18,10 @@ import {
   XCircle, 
   Clock, 
   X,
-  ChevronRight,
-  ArrowRight
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  SlidersHorizontal
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import Nav from '../components/Nav'
@@ -42,6 +44,10 @@ export default function OwnerDashboard() {
   const [customDate, setCustomDate] = useState(new Date().toISOString().slice(0, 10))
   const [directionFilter, setDirectionFilter] = useState('all') // 'all' | 'in' | 'out'
   const [stockStatusFilter, setStockStatusFilter] = useState('all') // 'all' | 'low' | 'out'
+
+  // Section 1 Origin Product Dropdown States
+  const [selectedOriginProduct, setSelectedOriginProduct] = useState('all')
+  const [expandedOrigins, setExpandedOrigins] = useState(new Set())
 
   useEffect(() => {
     load()
@@ -206,7 +212,7 @@ export default function OwnerDashboard() {
 
   const topProduct = topProducts[0] || null
 
-  // 5. Search & Filter Products List
+  // 5. Search & Filter Individual Products List
   const filteredProducts = useMemo(() => {
     const q = searchQuery.toLowerCase().trim()
     return materials.filter((m) => {
@@ -226,6 +232,68 @@ export default function OwnerDashboard() {
     })
   }, [materials, searchQuery, stockStatusFilter])
 
+  // 6. Group Products by Origin Product (Product Name) for Dropdown Method
+  const originProductsList = useMemo(() => {
+    const names = Array.from(new Set(materials.map((m) => m.name?.trim()).filter(Boolean)))
+    names.sort((a, b) => a.localeCompare(b))
+    return names
+  }, [materials])
+
+  const groupedOriginProducts = useMemo(() => {
+    const groups = {}
+
+    filteredProducts.forEach((m) => {
+      const originName = m.name?.trim() || 'Uncategorized Product'
+      
+      // Filter by selected origin product dropdown if set
+      if (selectedOriginProduct !== 'all' && originName !== selectedOriginProduct) {
+        return
+      }
+
+      if (!groups[originName]) {
+        groups[originName] = {
+          name: originName,
+          totalQty: 0,
+          unit: m.unit || 'pcs',
+          variants: [],
+          hasLowStock: false,
+          hasOutOfStock: false,
+        }
+      }
+
+      const qty = Number(m.current_qty) || 0
+      const threshold = Number(m.reorder_threshold ?? 0)
+
+      groups[originName].totalQty += qty
+      groups[originName].variants.push(m)
+
+      if (qty <= 0) groups[originName].hasOutOfStock = true
+      if (qty > 0 && qty <= threshold) groups[originName].hasLowStock = true
+    })
+
+    return Object.values(groups)
+  }, [filteredProducts, selectedOriginProduct])
+
+  function toggleOriginExpand(originName) {
+    setExpandedOrigins((prev) => {
+      const next = new Set(prev)
+      if (next.has(originName)) {
+        next.delete(originName)
+      } else {
+        next.add(originName)
+      }
+      return next
+    })
+  }
+
+  function expandAllOrigins() {
+    setExpandedOrigins(new Set(groupedOriginProducts.map((g) => g.name)))
+  }
+
+  function collapseAllOrigins() {
+    setExpandedOrigins(new Set())
+  }
+
   // Smooth scroll and flash highlight helper
   function scrollToElement(elementId, highlightKey) {
     const el = document.getElementById(elementId)
@@ -241,6 +309,9 @@ export default function OwnerDashboard() {
   function handleSelectProductResult(product) {
     setIsSearchFocused(false)
     setStockStatusFilter('all')
+    setSelectedOriginProduct('all')
+    // Make sure the origin product accordion is expanded
+    setExpandedOrigins((prev) => new Set([...prev, product.name?.trim()]))
     setTimeout(() => {
       scrollToElement(`product-card-${product.id}`, `product-${product.id}`)
     }, 60)
@@ -462,6 +533,7 @@ export default function OwnerDashboard() {
           <div
             onClick={() => {
               setStockStatusFilter('all')
+              setSelectedOriginProduct('all')
               scrollToElement('section-products')
             }}
             className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between cursor-pointer hover:border-blue-300 hover:shadow-md transition-all active:scale-[0.99] group"
@@ -484,6 +556,7 @@ export default function OwnerDashboard() {
           <div
             onClick={() => {
               setStockStatusFilter('all')
+              setSelectedOriginProduct('all')
               scrollToElement('section-products')
             }}
             className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all active:scale-[0.99] group"
@@ -506,6 +579,7 @@ export default function OwnerDashboard() {
           <div
             onClick={() => {
               setStockStatusFilter('low')
+              setSelectedOriginProduct('all')
               scrollToElement('section-products')
             }}
             className={`rounded-2xl p-4 sm:p-5 border shadow-xs flex flex-col justify-between cursor-pointer hover:shadow-md transition-all active:scale-[0.99] group ${
@@ -678,64 +752,102 @@ export default function OwnerDashboard() {
           </div>
         </div>
 
-        {/* Section 1: Total Quantity of Each Product */}
+        {/* Section 1: Total Quantity of Each Product (Dropdown Method to Origin Product) */}
         <div id="section-products" className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/90 shadow-xs mb-6 scroll-mt-20">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
             <div>
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-blue-600" />
                 <h2 className="text-base sm:text-lg font-bold text-slate-900">Total Quantity of Each Product</h2>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Complete list of registered inventory stock quantities & thresholds
+                Grouped by Origin Product with expandable dropdown model breakdown
               </p>
             </div>
 
-            {/* Filter Badges */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl self-start sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setStockStatusFilter('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  stockStatusFilter === 'all'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                All ({materials.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setStockStatusFilter('low')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  stockStatusFilter === 'low'
-                    ? 'bg-amber-500 text-white shadow-xs'
-                    : 'text-amber-700 hover:bg-amber-100/50'
-                }`}
-              >
-                Low ({lowStockItems.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setStockStatusFilter('out')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  stockStatusFilter === 'out'
-                    ? 'bg-rose-600 text-white shadow-xs'
-                    : 'text-rose-700 hover:bg-rose-100/50'
-                }`}
-              >
-                Out ({outOfStockItems.length})
-              </button>
+            {/* Controls: Origin Product Selector Dropdown & Stock Status Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Origin Product Dropdown Picker */}
+              <div className="flex items-center bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold">
+                <span className="text-slate-500 mr-2">Origin:</span>
+                <select
+                  value={selectedOriginProduct}
+                  onChange={(e) => setSelectedOriginProduct(e.target.value)}
+                  className="bg-transparent text-slate-900 font-bold focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="all">All Products ({originProductsList.length})</option>
+                  {originProductsList.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter Badges */}
+              <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setStockStatusFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    stockStatusFilter === 'all'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All ({materials.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockStatusFilter('low')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    stockStatusFilter === 'low'
+                      ? 'bg-amber-500 text-white shadow-xs'
+                      : 'text-amber-700 hover:bg-amber-100/50'
+                  }`}
+                >
+                  Low ({lowStockItems.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockStatusFilter('out')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    stockStatusFilter === 'out'
+                      ? 'bg-rose-600 text-white shadow-xs'
+                      : 'text-rose-700 hover:bg-rose-100/50'
+                  }`}
+                >
+                  Out ({outOfStockItems.length})
+                </button>
+              </div>
+
+              {/* Expand / Collapse All */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={expandAllOrigins}
+                  className="px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                >
+                  Expand All
+                </button>
+                <button
+                  type="button"
+                  onClick={collapseAllOrigins}
+                  className="px-2.5 py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  Collapse
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Product Items Grid */}
+          {/* Grouped Origin Products with Dropdown / Accordion Breakdown */}
           {loading ? (
             <div className="py-10 text-center text-slate-400">
               <div className="w-7 h-7 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-2" />
               <p className="text-xs">Loading inventory products...</p>
             </div>
-          ) : filteredProducts.length === 0 ? (
+          ) : groupedOriginProducts.length === 0 ? (
             <div className="py-10 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 p-6">
               <p className="font-semibold text-slate-700 text-sm">No products found</p>
               <p className="text-xs text-slate-400 mt-1">
@@ -743,82 +855,148 @@ export default function OwnerDashboard() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-              {filteredProducts.map((m) => {
-                const qty = Number(m.current_qty) || 0
-                const threshold = Number(m.reorder_threshold ?? 0)
-                const isOut = qty <= 0
-                const isLow = !isOut && qty <= threshold
-                const isHighlighted = highlightedId === `product-${m.id}`
+            <div className="space-y-3">
+              {groupedOriginProducts.map((group) => {
+                const isExpanded = expandedOrigins.has(group.name) || groupedOriginProducts.length === 1
+                const isOut = group.hasOutOfStock || group.totalQty <= 0
+                const isLow = !isOut && group.hasLowStock
 
                 return (
                   <div
-                    key={m.id}
-                    id={`product-card-${m.id}`}
-                    className={`p-4 rounded-xl border transition-all duration-300 flex flex-col justify-between ${
-                      isHighlighted
-                        ? 'ring-4 ring-blue-500 bg-blue-50/70 border-blue-400 shadow-md scale-[1.01]'
-                        : 'bg-slate-50 hover:bg-white border-slate-200 hover:border-slate-300 hover:shadow-xs'
-                    }`}
+                    key={group.name}
+                    className="border border-slate-200/90 rounded-2xl bg-white overflow-hidden shadow-xs hover:border-slate-300 transition-all"
                   >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <h4 className="font-bold text-slate-900 text-sm leading-snug truncate flex-1">
-                          {m.name}
-                        </h4>
+                    {/* Origin Product Header Bar (Clickable to dropdown variants) */}
+                    <div
+                      onClick={() => toggleOriginExpand(group.name)}
+                      className="p-4 sm:p-4.5 bg-slate-50/70 hover:bg-slate-100/70 cursor-pointer flex items-center justify-between gap-3 transition-colors select-none"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="w-8 h-8 rounded-xl bg-blue-100/70 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0">
+                          <Package className="w-4 h-4" />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-bold text-slate-900 text-sm sm:text-base tracking-tight truncate">
+                              {group.name}
+                            </h3>
+                            <span className="px-2 py-0.5 bg-slate-200/70 text-slate-700 rounded-full text-[11px] font-semibold">
+                              {group.variants.length} {group.variants.length === 1 ? 'Model / Variant' : 'Models / Variants'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Total and Dropdown Trigger */}
+                      <div className="flex items-center gap-3 shrink-0 pl-2">
+                        <div className="text-right">
+                          <div className="text-[10px] uppercase font-bold text-slate-400">Total Origin Stock</div>
+                          <div className="text-sm sm:text-base font-black text-slate-900">
+                            {group.totalQty.toLocaleString()}{' '}
+                            <span className="text-xs font-semibold text-slate-500">{group.unit}</span>
+                          </div>
+                        </div>
+
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 flex items-center gap-1 ${
+                          className={`hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                             isOut
-                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                              ? 'bg-rose-100 text-rose-800'
                               : isLow
-                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
                           }`}
                         >
-                          {isOut ? (
-                            <>
-                              <XCircle className="w-3 h-3 text-rose-600" /> Out
-                            </>
-                          ) : isLow ? (
-                            <>
-                              <AlertTriangle className="w-3 h-3 text-amber-600" /> Low stock
-                            </>
+                          {isOut ? 'Out of stock' : isLow ? 'Low stock' : 'In stock'}
+                        </span>
+
+                        <div className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-600">
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4" />
                           ) : (
-                            <>
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> In stock
-                            </>
+                            <ChevronDown className="w-4 h-4" />
                           )}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mb-3">
-                        <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">
-                          {m.sku}
-                        </span>
-                        {m.model && (
-                          <span className="text-slate-500 font-medium">
-                            • {m.model}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-end justify-between pt-2.5 border-t border-slate-200/70">
-                      <div>
-                        <div className="text-[10px] uppercase font-bold text-slate-400">Total Quantity</div>
-                        <div className="text-lg font-bold text-slate-900">
-                          {qty.toLocaleString()}{' '}
-                          <span className="text-xs font-medium text-slate-500">{m.unit || 'pcs'}</span>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-[10px] uppercase font-bold text-slate-400">Alert Min</div>
-                        <div className="text-xs font-semibold text-slate-600">
-                          ≤ {threshold} {m.unit || 'pcs'}
                         </div>
                       </div>
                     </div>
+
+                    {/* Dropped-down Model Breakdown */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="border-t border-slate-200/80 divide-y divide-slate-100 bg-white"
+                        >
+                          <div className="p-3 sm:p-4 bg-slate-50/40">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                              {group.variants.map((m) => {
+                                const qty = Number(m.current_qty) || 0
+                                const threshold = Number(m.reorder_threshold ?? 0)
+                                const mIsOut = qty <= 0
+                                const mIsLow = !mIsOut && qty <= threshold
+                                const isHighlighted = highlightedId === `product-${m.id}`
+
+                                return (
+                                  <div
+                                    key={m.id}
+                                    id={`product-card-${m.id}`}
+                                    className={`p-3.5 rounded-xl border transition-all duration-300 flex flex-col justify-between ${
+                                      isHighlighted
+                                        ? 'ring-4 ring-blue-500 bg-blue-50/80 border-blue-400 shadow-md scale-[1.01]'
+                                        : 'bg-white hover:bg-slate-50/80 border-slate-200'
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                                        <div className="font-bold text-slate-900 text-xs sm:text-sm truncate flex-1">
+                                          {m.model || m.name}
+                                        </div>
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
+                                            mIsOut
+                                              ? 'bg-rose-100 text-rose-800'
+                                              : mIsLow
+                                              ? 'bg-amber-100 text-amber-800'
+                                              : 'bg-emerald-100 text-emerald-800'
+                                          }`}
+                                        >
+                                          {mIsOut ? 'Out' : mIsLow ? 'Low' : 'In stock'}
+                                        </span>
+                                      </div>
+
+                                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mb-2.5">
+                                        <span className="font-mono bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200 text-slate-700">
+                                          {m.sku}
+                                        </span>
+                                        {m.model && <span className="text-slate-400">• {m.name}</span>}
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-end justify-between pt-2 border-t border-slate-100 text-xs">
+                                      <div>
+                                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Quantity</span>
+                                        <span className="font-extrabold text-slate-900 text-sm">
+                                          {qty.toLocaleString()} <span className="text-[11px] font-normal text-slate-500">{m.unit || 'pcs'}</span>
+                                        </span>
+                                      </div>
+                                      <div className="text-right">
+                                        <span className="text-[10px] text-slate-400 uppercase font-semibold block">Alert Min</span>
+                                        <span className="font-semibold text-slate-600 text-xs">
+                                          ≤ {threshold} {m.unit || 'pcs'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )
               })}
