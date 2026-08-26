@@ -22,7 +22,8 @@ import {
   ChevronUp,
   ChevronsUpDown,
   SlidersHorizontal,
-  FileText
+  FileText,
+  Megaphone
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { advancedFilterMaterials } from '../lib/searchUtils'
