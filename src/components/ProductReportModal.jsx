@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { jsPDF } from 'jspdf'
 import { 
@@ -22,6 +22,18 @@ const KNOWN_BRANDS = [
 ]
 
 export default function ProductReportModal({ isOpen, onClose, materials = [], initialProductName = '' }) {
+  if (!isOpen) return null
+
+  return (
+    <ProductReportModalContent
+      onClose={onClose}
+      materials={materials}
+      initialProductName={initialProductName}
+    />
+  )
+}
+
+function ProductReportModalContent({ onClose, materials = [], initialProductName = '' }) {
   const distinctProductNames = useMemo(() => {
     const names = Array.from(new Set(materials.map((m) => m.name?.trim()).filter(Boolean)))
     names.sort((a, b) => a.localeCompare(b))
@@ -34,13 +46,13 @@ export default function ProductReportModal({ isOpen, onClose, materials = [], in
   const [copied, setCopied] = useState(false)
 
   // Sync selected product if initialProductName changes
-  useMemo(() => {
+  useEffect(() => {
     if (initialProductName && distinctProductNames.includes(initialProductName)) {
       setSelectedProduct(initialProductName)
     } else if (!selectedProduct && distinctProductNames.length > 0) {
       setSelectedProduct(distinctProductNames[0])
     }
-  }, [initialProductName, distinctProductNames])
+  }, [initialProductName, distinctProductNames, selectedProduct])
 
   // Filter ONLY in-stock models (current_qty > 0) for marketing broadcast
   const inStockVariants = useMemo(() => {
@@ -81,11 +93,6 @@ export default function ProductReportModal({ isOpen, onClose, materials = [], in
   }, [inStockVariants])
 
   const totalInStockModels = inStockVariants.length
-  const totalInStockUnits = useMemo(() => {
-    return inStockVariants.reduce((sum, v) => sum + (Number(v.current_qty) || 0), 0)
-  }, [inStockVariants])
-
-  if (!isOpen) return null
 
   function handleCopyMarketingText() {
     if (!selectedProduct || inStockVariants.length === 0) return
@@ -164,7 +171,6 @@ export default function ProductReportModal({ isOpen, onClose, materials = [], in
     const brandKeys = Object.keys(groupedByBrand).sort()
 
     brandKeys.forEach((brand) => {
-      // Check page overflow
       if (startY > 255) {
         doc.addPage()
         startY = 20
@@ -231,7 +237,7 @@ export default function ProductReportModal({ isOpen, onClose, materials = [], in
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

@@ -158,9 +158,11 @@ export default function OwnerDashboard() {
       const matchesDirection = directionFilter === 'all' || tx.direction === directionFilter
 
       const q = searchQuery.toLowerCase().trim()
-      const matName = tx.materials?.name?.toLowerCase() || ''
-      const matModel = tx.materials?.model?.toLowerCase() || ''
-      const matSku = tx.materials?.sku?.toLowerCase() || ''
+      const rawMat = tx.materials
+      const mat = Array.isArray(rawMat) ? rawMat[0] : rawMat
+      const matName = mat?.name?.toLowerCase() || ''
+      const matModel = mat?.model?.toLowerCase() || ''
+      const matSku = mat?.sku?.toLowerCase() || ''
       const matchesSearch = !q || matName.includes(q) || matModel.includes(q) || matSku.includes(q)
 
       return matchesDate && matchesDirection && matchesSearch
@@ -189,16 +191,18 @@ export default function OwnerDashboard() {
     const productStats = {}
 
     transactions.forEach((tx) => {
-      const mat = tx.materials
-      if (!mat) return
-      const id = mat.id || tx.material_id
+      const rawMat = tx.materials
+      const mat = Array.isArray(rawMat) ? rawMat[0] : rawMat
+      const id = mat?.id || tx.material_id
+      if (!id) return
+
       if (!productStats[id]) {
         productStats[id] = {
           id,
-          name: mat.name,
-          model: mat.model,
-          sku: mat.sku,
-          unit: mat.unit || 'pcs',
+          name: mat?.name || 'Unknown Product',
+          model: mat?.model || '',
+          sku: mat?.sku || 'N/A',
+          unit: mat?.unit || 'pcs',
           totalMoved: 0,
           inward: 0,
           outward: 0,
@@ -1154,8 +1158,8 @@ export default function OwnerDashboard() {
                 const isIn = tx.direction === 'in'
                 const dateObj = new Date(tx.created_at)
                 const formattedTime = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                const formattedDate = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
-                const mat = tx.materials
+                const rawMat = tx.materials
+                const mat = Array.isArray(rawMat) ? rawMat[0] : rawMat
                 const isHighlighted = highlightedId === `tx-${tx.id}`
 
                 return (
