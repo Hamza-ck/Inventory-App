@@ -13,10 +13,11 @@ db.version(1).stores({
   materialsCache: 'sku, name, currentQty, updatedAt',
 })
 
-export async function addToQueue({ sku, name, direction }) {
+export async function addToQueue({ sku, name, model, direction }) {
   return db.queue.add({
     sku,
     name: name || null,
+    model: model || null,
     qty: '', // left blank on purpose — user fills it in, or leaves it
     direction, // 'in' | 'out'
     createdAt: new Date().toISOString(),

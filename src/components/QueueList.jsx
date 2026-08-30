@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, ArrowUp, Trash2, Plus, Minus, Inbox } from 'lucide-react'
@@ -5,6 +6,17 @@ import { db, updateQueueQty, removeFromQueue } from '../lib/db'
 
 export default function QueueList() {
   const items = useLiveQuery(() => db.queue.orderBy('createdAt').reverse().toArray(), [])
+  const cachedMaterials = useLiveQuery(() => db.materialsCache.toArray(), [])
+
+  const cacheMap = useMemo(() => {
+    const map = new Map()
+    if (cachedMaterials) {
+      cachedMaterials.forEach((m) => {
+        if (m.sku) map.set(m.sku, m)
+      })
+    }
+    return map
+  }, [cachedMaterials])
 
   if (!items) return null
 
@@ -37,6 +49,11 @@ export default function QueueList() {
       <AnimatePresence>
         {items.map((item) => {
           const isIn = item.direction === 'in'
+          const cached = cacheMap.get(item.sku)
+          const itemModel = (item.model || cached?.model || '').trim()
+          const itemName = (item.name || cached?.name || '').trim()
+          const displayName = itemName || itemModel || 'Unregistered Material'
+
           return (
             <motion.div
               key={item.id}
@@ -49,10 +66,17 @@ export default function QueueList() {
               {/* Card Top */}
               <div className="flex items-start justify-between gap-3 mb-3">
                 <div className="min-w-0 flex-1">
-                  <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-tight truncate">
-                    {item.name || 'Unregistered Material'}
-                  </h4>
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-tight">
+                      {displayName}
+                    </h4>
+                    {itemModel && itemModel !== itemName && (
+                      <span className="inline-flex items-center font-bold text-xs text-blue-700 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg shadow-2xs">
+                        {itemModel}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1.5">
                     <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
                       {item.sku}
                     </span>

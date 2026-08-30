@@ -135,7 +135,7 @@ export default function ScanPage() {
     }
 
     // Add to queue
-    const queueId = await addToQueue({ sku, name, direction: currentDirection })
+    const queueId = await addToQueue({ sku, name, model, direction: currentDirection })
 
     // Trigger visual pop-up modal showing Model Name (h3) and Product Name (h5)
     setScannedPopup({
@@ -193,7 +193,12 @@ export default function ScanPage() {
       model: quickAdd.model.trim() || '',
       updatedAt: new Date().toISOString(),
     })
-    const queueId = await addToQueue({ sku: unknownSku, name: quickAdd.name.trim(), direction })
+    const queueId = await addToQueue({
+      sku: unknownSku,
+      name: quickAdd.name.trim(),
+      model: quickAdd.model.trim() || null,
+      direction,
+    })
     
     // Show popup
     setScannedPopup({

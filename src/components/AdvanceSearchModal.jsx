@@ -56,6 +56,7 @@ export default function AdvanceSearchModal({
     await addToQueue({
       sku: material.sku,
       name: material.name,
+      model: material.model || null,
       direction: direction,
     })
     if (onItemAddedToQueue) {
