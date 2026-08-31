@@ -14,15 +14,10 @@ import {
   Boxes, 
   Layers, 
   Filter, 
-  CheckCircle2, 
-  XCircle, 
   Clock, 
   X,
   ChevronDown,
   ChevronUp,
-  ChevronsUpDown,
-  SlidersHorizontal,
-  FileText,
   Megaphone
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
@@ -1158,10 +1153,16 @@ export default function OwnerDashboard() {
               {filteredTransactions.map((tx) => {
                 const isIn = tx.direction === 'in'
                 const dateObj = new Date(tx.created_at)
+                const formattedDate = dateObj.toLocaleDateString([], {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })
                 const formattedTime = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 const rawMat = tx.materials
                 const mat = Array.isArray(rawMat) ? rawMat[0] : rawMat
                 const isHighlighted = highlightedId === `tx-${tx.id}`
+
 
                 return (
                   <div

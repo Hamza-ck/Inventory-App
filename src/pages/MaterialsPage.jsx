@@ -955,7 +955,8 @@ export default function MaterialsPage() {
             {filtered.map((m) => {
               const qty = Number(m.current_qty) || 0
               const threshold = Number(m.reorder_threshold ?? 0)
-              const isLow = qty <= threshold
+              const isOut = qty <= 0
+              const isLow = !isOut && qty <= threshold
 
               return (
                 <motion.div
@@ -972,12 +973,14 @@ export default function MaterialsPage() {
                       </h4>
                       <span
                         className={`px-2.5 py-1 rounded-full text-xs font-bold shrink-0 ${
-                          isLow
+                          isOut
+                            ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                            : isLow
                             ? 'bg-amber-50 text-amber-800 border border-amber-200'
                             : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                         }`}
                       >
-                        {isLow ? '⚠️ Low' : '✓ In Stock'}
+                        {isOut ? '🚫 Out of Stock' : isLow ? '⚠️ Low' : '✓ In Stock'}
                       </span>
                     </div>
 
