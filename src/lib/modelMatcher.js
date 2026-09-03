@@ -411,3 +411,43 @@ export function generateSkuForModel(modelName, existingMaterials = [], productNa
   const prefix = preferredPrefix || detectProductSkuPrefix(productName, existingMaterials)
   return getNextSequentialSku(prefix, existingMaterials)
 }
+
+/**
+ * Checks if a given SKU code conflicts with any existing material in inventory
+ * or another item in the current batch.
+ * Guarantees that existing SKU codes are never overwritten.
+ */
+export function checkSkuConflict(sku, existingMaterials = [], batchItems = [], currentItemId = null) {
+  if (!sku || !sku.trim()) {
+    return { isConflict: false, conflictingMaterial: null, isDuplicateInBatch: false }
+  }
+  const cleanSku = sku.trim().toLowerCase()
+
+  // 1. Check if SKU already exists in catalog
+  const existing = existingMaterials.find((m) => (m.sku || '').trim().toLowerCase() === cleanSku)
+  if (existing) {
+    return {
+      isConflict: true,
+      conflictingMaterial: existing,
+      isDuplicateInBatch: false,
+    }
+  }
+
+  // 2. Check if another item in the current batch already claimed this SKU
+  if (batchItems && batchItems.length > 0) {
+    const dupItem = batchItems.find(
+      (item) => item.id !== currentItemId && (item.newSku || '').trim().toLowerCase() === cleanSku
+    )
+    if (dupItem) {
+      return {
+        isConflict: true,
+        conflictingMaterial: null,
+        isDuplicateInBatch: true,
+        conflictingLine: dupItem.rawLine || dupItem.rawModel,
+      }
+    }
+  }
+
+  return { isConflict: false, conflictingMaterial: null, isDuplicateInBatch: false }
+}
+

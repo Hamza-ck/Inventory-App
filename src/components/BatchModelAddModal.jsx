@@ -29,6 +29,7 @@ import {
   matchModelToMaterials,
   detectProductSkuPrefix,
   getNextSequentialSku,
+  checkSkuConflict,
 } from '../lib/modelMatcher'
 
 const SAMPLE_TEXT = `A6PRO-15\nOP F33-13\nREALME 14-32\nREALME 16T-7`
@@ -252,15 +253,54 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
     setItems((prev) => prev.map((it) => ({ ...it, isVerified: true })))
   }
 
-  // Summary statistics
+  // Auto-resolve single SKU conflict to next truly available unique SKU
+  function autoResolveSku(id) {
+    setItems((prev) => {
+      const usedSkus = new Set(
+        prev
+          .filter((x) => x.id !== id && x.isNewSku)
+          .map((x) => (x.newSku || '').trim().toLowerCase())
+      )
+      const safeSku = getNextSequentialSku(skuPrefix, materials, usedSkus)
+      return prev.map((it) => (it.id === id ? { ...it, newSku: safeSku } : it))
+    })
+  }
+
+  // Auto-resolve all SKU conflicts across the batch
+  function autoResolveAllSkus() {
+    setItems((prev) => {
+      const usedSkus = new Set()
+      return prev.map((it) => {
+        if (!it.isNewSku) return it
+        const conflict = checkSkuConflict(it.newSku, materials, prev, it.id)
+        if (conflict.isConflict) {
+          const safeSku = getNextSequentialSku(skuPrefix, materials, usedSkus)
+          usedSkus.add(safeSku.toLowerCase())
+          return { ...it, newSku: safeSku }
+        }
+        usedSkus.add((it.newSku || '').trim().toLowerCase())
+        return it
+      })
+    })
+  }
+
+  // Summary statistics with SKU conflict detection
   const stats = useMemo(() => {
     const total = items.length
     const matched = items.filter((i) => !i.isNewSku && i.matchedMaterial).length
     const newSkus = items.filter((i) => i.isNewSku).length
     const verified = items.filter((i) => i.isVerified).length
     const totalQty = items.reduce((acc, i) => acc + (Number(i.qty) || 0), 0)
-    return { total, matched, newSkus, verified, totalQty }
-  }, [items])
+
+    // Check if any verified item has an SKU that conflicts with existing catalog or another row
+    const conflictingCount = items.filter((i) => {
+      if (!i.isNewSku || !i.isVerified) return false
+      const { isConflict } = checkSkuConflict(i.newSku, materials, items, i.id)
+      return isConflict
+    }).length
+
+    return { total, matched, newSkus, verified, totalQty, conflictingCount }
+  }, [items, materials])
 
   // Filtered materials for inline link changer
   const inlineSearchMaterials = useMemo(() => {
@@ -292,6 +332,7 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
 
     const updatedItems = []
     const createdSkus = []
+    const usedSkusInBatch = new Set()
     let failedCount = 0
 
     try {
@@ -302,7 +343,22 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
 
         // Case 1: Create New SKU in `materials`
         if (item.isNewSku || !targetMaterial) {
-          const skuCode = (item.newSku || getNextSequentialSku(skuPrefix, materials)).trim()
+          let skuCode = (item.newSku || getNextSequentialSku(skuPrefix, materials, usedSkusInBatch)).trim()
+
+          // Strict Database Check: Ensure we NEVER overwrite an existing SKU in the DB
+          const { data: dbExisting } = await supabase
+            .from('materials')
+            .select('id, sku, name, model')
+            .eq('sku', skuCode)
+            .maybeSingle()
+
+          if (dbExisting) {
+            // Existing SKU found! Do NOT overwrite existing record. Auto-assign next unique SKU.
+            skuCode = getNextSequentialSku(skuPrefix, [...materials, dbExisting], usedSkusInBatch)
+            console.warn(`Protected existing SKU "${dbExisting.sku}". Auto-assigned unique SKU "${skuCode}".`)
+          }
+          usedSkusInBatch.add(skuCode.toLowerCase())
+
           const newPayload = {
             sku: skuCode,
             name: (item.targetProductName || effectiveProduct).trim(),
@@ -312,6 +368,7 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
             reorder_threshold: Number(item.newThreshold) || 5,
           }
 
+          // Use INSERT ONLY (never upsert), strictly preserving all existing database records
           const { data: insertedData, error: insertError } = await supabase
             .from('materials')
             .insert(newPayload)
@@ -899,13 +956,46 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
                                   />
                                 </div>
                                 <div className="col-span-2 sm:col-span-1">
-                                  <label className="block text-[10px] font-bold text-slate-500 uppercase">New SKU Code</label>
-                                  <input
-                                    type="text"
-                                    value={item.newSku}
-                                    onChange={(e) => updateItem(item.id, { newSku: e.target.value })}
-                                    className="w-full px-2 py-1 bg-white border border-purple-300 rounded-md font-mono font-bold text-purple-800"
-                                  />
+                                  {(() => {
+                                    const conflict = checkSkuConflict(item.newSku, materials, items, item.id)
+                                    return (
+                                      <>
+                                        <div className="flex items-center justify-between">
+                                          <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                                            New SKU Code
+                                          </label>
+                                          {conflict.isConflict && (
+                                            <button
+                                              type="button"
+                                              onClick={() => autoResolveSku(item.id)}
+                                              className="text-[10px] text-indigo-600 font-bold hover:underline flex items-center gap-0.5"
+                                              title="Auto-fix to next free unique SKU"
+                                            >
+                                              <RotateCcw className="w-2.5 h-2.5" />
+                                              <span>Auto-Fix</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                        <input
+                                          type="text"
+                                          value={item.newSku}
+                                          onChange={(e) => updateItem(item.id, { newSku: e.target.value })}
+                                          className={`w-full px-2 py-1 bg-white border rounded-md font-mono font-bold text-xs ${
+                                            conflict.isConflict
+                                              ? 'border-rose-500 bg-rose-50/50 text-rose-800 focus:ring-rose-500'
+                                              : 'border-purple-300 text-purple-800'
+                                          }`}
+                                        />
+                                        {conflict.isConflict && (
+                                          <div className="text-[10px] text-rose-600 font-semibold mt-0.5 leading-tight">
+                                            {conflict.conflictingMaterial
+                                              ? `⚠️ Cannot overwrite: already belongs to "${conflict.conflictingMaterial.name} — ${conflict.conflictingMaterial.model || 'Standard'}"`
+                                              : `⚠️ Duplicate SKU in batch (line "${conflict.conflictingLine}")`}
+                                          </div>
+                                        )}
+                                      </>
+                                    )
+                                  })()}
                                 </div>
                               </div>
                             </div>
@@ -994,6 +1084,25 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
                 })}
               </div>
 
+              {/* Conflicting SKU Global Alert Banner */}
+              {stats.conflictingCount > 0 && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>
+                      {stats.conflictingCount} new item(s) have conflicting SKU codes. Existing SKUs cannot be overwritten. Click &quot;Auto-Fix All&quot; to assign unique codes.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={autoResolveAllSkus}
+                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shrink-0 transition-colors cursor-pointer"
+                  >
+                    Auto-Fix All
+                  </button>
+                </div>
+              )}
+
               {/* Error Alert */}
               {processError && (
                 <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2">
@@ -1006,6 +1115,11 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="text-xs text-slate-500 text-center sm:text-left">
                   {stats.verified} of {stats.total} items approved to be updated in <strong>{effectiveProduct}</strong>.
+                  {stats.conflictingCount > 0 && (
+                    <span className="text-rose-600 font-bold ml-1">
+                      ({stats.conflictingCount} conflicting SKU codes must be fixed)
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
@@ -1020,7 +1134,7 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
                   <button
                     type="button"
                     onClick={handleConfirmAndApply}
-                    disabled={isProcessing || stats.verified === 0}
+                    disabled={isProcessing || stats.verified === 0 || stats.conflictingCount > 0}
                     className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex-1 sm:flex-initial"
                   >
                     {isProcessing ? (
@@ -1031,7 +1145,11 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
                     ) : (
                       <>
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>Confirm & Add Stock ({stats.verified} items)</span>
+                        <span>
+                          {stats.conflictingCount > 0
+                            ? `Resolve ${stats.conflictingCount} SKU Conflict(s)`
+                            : `Confirm & Add Stock (${stats.verified} items)`}
+                        </span>
                       </>
                     )}
                   </button>
