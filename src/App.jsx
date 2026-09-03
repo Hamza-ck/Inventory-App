@@ -12,6 +12,7 @@ const ScanPage = lazy(() => import('./pages/ScanPage'))
 const OwnerDashboard = lazy(() => import('./pages/OwnerDashboard'))
 const MaterialsPage = lazy(() => import('./pages/MaterialsPage'))
 const LabelsPage = lazy(() => import('./pages/LabelsPage'))
+const HistoryPage = lazy(() => import('./pages/HistoryPage'))
 
 function HomeRedirect() {
   const { isOwner, loading } = useAuth()
@@ -40,6 +41,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <ScanPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/history"
+              element={
+                <ProtectedRoute>
+                  <HistoryPage />
                 </ProtectedRoute>
               }
             />

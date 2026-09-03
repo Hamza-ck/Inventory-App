@@ -9,7 +9,8 @@ import {
   UserPlus,
   Search,
   FileText,
-  Megaphone
+  Megaphone,
+  History
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
@@ -82,6 +83,20 @@ export default function Nav() {
             >
               <QrCode className="w-3.5 h-3.5" />
               <span>Scanner</span>
+            </NavLink>
+
+            <NavLink
+              to="/history"
+              className={({ isActive }) =>
+                `flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  isActive
+                    ? 'bg-white text-blue-600 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                }`
+              }
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>History</span>
             </NavLink>
 
             {isOwner && (
@@ -221,6 +236,18 @@ export default function Nav() {
           <Search className="w-5 h-5" />
           <span>Search</span>
         </button>
+
+        <NavLink
+          to="/history"
+          className={({ isActive }) =>
+            `flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all flex-1 ${
+              isActive ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-700'
+            }`
+          }
+        >
+          <History className="w-5 h-5" />
+          <span>History</span>
+        </NavLink>
 
         {isOwner && (
           <>

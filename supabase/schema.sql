@@ -83,6 +83,34 @@ create trigger trg_apply_transaction
 after insert on public.transactions
 for each row execute function public.apply_transaction();
 
+-- Reverse the qty change when a transaction is deleted (undo)
+create or replace function public.reverse_transaction()
+returns trigger as $$
+begin
+  if old.direction = 'in' then
+    update public.materials set current_qty = current_qty - old.qty where id = old.material_id;
+  else
+    update public.materials set current_qty = current_qty + old.qty where id = old.material_id;
+  end if;
+  return old;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_reverse_transaction on public.transactions;
+create trigger trg_reverse_transaction
+before delete on public.transactions
+for each row execute function public.reverse_transaction();
+
+-- Allow owner to delete any transaction (undo any movement)
+create policy "owner can delete any transaction" on public.transactions
+  for delete using (
+    exists (select 1 from public.profiles where id = auth.uid() and role = 'owner')
+  );
+
+-- Allow employee to delete only their own transactions (undo own movement)
+create policy "employee can delete own transaction" on public.transactions
+  for delete using (auth.uid() = user_id);
+
 -- auto-create or update profile with chosen role whenever a new user signs up
 create or replace function public.handle_new_user()
 returns trigger as $$

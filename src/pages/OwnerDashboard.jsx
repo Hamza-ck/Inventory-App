@@ -18,7 +18,9 @@ import {
   X,
   ChevronDown,
   ChevronUp,
-  Megaphone
+  Megaphone,
+  Undo2,
+  CheckCircle2,
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { advancedFilterMaterials } from '../lib/searchUtils'
@@ -49,6 +51,12 @@ export default function OwnerDashboard() {
   // Section 1 Origin Product Dropdown States
   const [selectedOriginProduct, setSelectedOriginProduct] = useState('all')
   const [expandedOrigins, setExpandedOrigins] = useState(new Set())
+
+  // Delete / Undo Transaction States
+  const [deletingTx, setDeletingTx] = useState(null)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [toastMessage, setToastMessage] = useState(null)
 
   useEffect(() => {
     load()
@@ -291,6 +299,44 @@ export default function OwnerDashboard() {
     setIsReportOpen(true)
   }
 
+  // Delete / Undo Transaction Handlers
+  function openDeleteModal(tx) {
+    setDeletingTx(tx)
+    setIsDeleteModalOpen(true)
+  }
+
+  function closeDeleteModal() {
+    setIsDeleteModalOpen(false)
+    setDeletingTx(null)
+  }
+
+  async function handleDeleteTransaction() {
+    if (!deletingTx) return
+    setDeleting(true)
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', deletingTx.id)
+
+      if (error) throw error
+
+      const rawMat = deletingTx.materials
+      const mat = Array.isArray(rawMat) ? rawMat[0] : rawMat
+      const productName = mat?.model || mat?.name || 'Item'
+      const dirLabel = deletingTx.direction === 'in' ? 'Inward' : 'Outward'
+
+      closeDeleteModal()
+      setToastMessage(`✓ Undone: ${dirLabel} of ${deletingTx.qty} ${mat?.unit || 'pcs'} "${productName}" — stock restored`)
+      setTimeout(() => setToastMessage(null), 5000)
+      load()
+    } catch (err) {
+      alert(`Could not undo transaction: ${err.message}`)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   // Smooth scroll and flash highlight helper
   function scrollToElement(elementId, highlightKey) {
     const el = document.getElementById(elementId)
@@ -374,6 +420,30 @@ export default function OwnerDashboard() {
             </button>
           </div>
         </div>
+
+        {/* Success Toast Notification */}
+        <AnimatePresence>
+          {toastMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs sm:text-sm font-semibold mb-5 flex items-center justify-between shadow-xs"
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>{toastMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setToastMessage(null)}
+                className="p-1 text-emerald-600 hover:text-emerald-900"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Global Search Bar with Typeahead Dropdown */}
         <div ref={searchContainerRef} className="relative mb-6 z-30">
@@ -1168,7 +1238,7 @@ export default function OwnerDashboard() {
                   <div
                     key={tx.id}
                     id={`tx-item-${tx.id}`}
-                    className={`flex items-center justify-between p-3 rounded-xl border transition-all duration-300 ${
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-all duration-300 group ${
                       isHighlighted
                         ? 'ring-4 ring-blue-500 bg-blue-50/70 border-blue-400 shadow-md scale-[1.01]'
                         : 'bg-slate-50 hover:bg-slate-100/80 border-slate-200/80'
@@ -1203,26 +1273,38 @@ export default function OwnerDashboard() {
                       </div>
                     </div>
 
-                    <div className="text-right shrink-0 pl-3">
-                      <div
-                        className={`text-sm font-bold ${
-                          isIn ? 'text-emerald-600' : 'text-rose-600'
-                        }`}
-                      >
-                        {isIn ? `+${tx.qty}` : `-${tx.qty}`}{' '}
-                        <span className="text-xs font-normal text-slate-500">
-                          {mat?.unit || 'pcs'}
+                    <div className="flex items-center gap-2.5 shrink-0 pl-3">
+                      <div className="text-right">
+                        <div
+                          className={`text-sm font-bold ${
+                            isIn ? 'text-emerald-600' : 'text-rose-600'
+                          }`}
+                        >
+                          {isIn ? `+${tx.qty}` : `-${tx.qty}`}{' '}
+                          <span className="text-xs font-normal text-slate-500">
+                            {mat?.unit || 'pcs'}
+                          </span>
+                        </div>
+                        <span
+                          className={`inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+                            isIn
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-rose-50 text-rose-700'
+                          }`}
+                        >
+                          {isIn ? 'Inward' : 'Outward'}
                         </span>
                       </div>
-                      <span
-                        className={`inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
-                          isIn
-                            ? 'bg-emerald-50 text-emerald-700'
-                            : 'bg-rose-50 text-rose-700'
-                        }`}
+
+                      {/* Undo Button */}
+                      <button
+                        type="button"
+                        onClick={() => openDeleteModal(tx)}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all opacity-60 group-hover:opacity-100"
+                        title="Undo this transaction"
                       >
-                        {isIn ? 'Inward' : 'Outward'}
-                      </span>
+                        <Undo2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 )
@@ -1248,6 +1330,107 @@ export default function OwnerDashboard() {
         materials={materials}
         initialProductName={reportProduct}
       />
+
+      {/* Undo Transaction Confirmation Modal */}
+      <AnimatePresence>
+        {isDeleteModalOpen && deletingTx && (() => {
+          const rawMat = deletingTx.materials
+          const mat = Array.isArray(rawMat) ? rawMat[0] : rawMat
+          const isIn = deletingTx.direction === 'in'
+
+          return (
+            <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-md shadow-2xl border border-rose-200 text-center"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4 border border-rose-100 shadow-sm">
+                  <Undo2 className="w-7 h-7" />
+                </div>
+
+                <h3 className="text-lg font-bold text-slate-900 mb-2">
+                  Undo This Transaction?
+                </h3>
+
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-left mb-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 font-semibold">Product</span>
+                    <span className="font-bold text-slate-900">{mat?.model || mat?.name || 'Unknown'}</span>
+                  </div>
+                  {mat?.model && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 font-semibold">Category</span>
+                      <span className="font-medium text-slate-700">{mat?.name}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 font-semibold">SKU</span>
+                    <span className="font-mono text-slate-700">{mat?.sku || 'N/A'}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 font-semibold">Direction</span>
+                    <span className={`font-bold ${isIn ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {isIn ? '\u2193 Inward' : '\u2191 Outward'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 font-semibold">Quantity</span>
+                    <span className="font-bold text-slate-900">{deletingTx.qty} {mat?.unit || 'pcs'}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 font-semibold">Date</span>
+                    <span className="text-slate-700">
+                      {new Date(deletingTx.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}{' '}
+                      {new Date(deletingTx.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-medium mb-5 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>
+                    This will <strong>delete</strong> this transaction and <strong>reverse</strong> the stock change.
+                    {isIn
+                      ? ` ${deletingTx.qty} ${mat?.unit || 'pcs'} will be subtracted from current stock.`
+                      : ` ${deletingTx.qty} ${mat?.unit || 'pcs'} will be added back to current stock.`}
+                  </span>
+                </div>
+
+                <div className="flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleDeleteTransaction}
+                    disabled={deleting}
+                    className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-rose-600/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {deleting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Undoing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Undo2 className="w-4 h-4" />
+                        <span>Yes, Undo Transaction</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={closeDeleteModal}
+                    className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs sm:text-sm rounded-xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )
+        })()}
+      </AnimatePresence>
     </div>
   )
 }
