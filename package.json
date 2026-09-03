@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
     "@tailwindcss/vite": "^4.3.3",
+    "@vercel/speed-insights": "^2.0.0",
     "dexie": "^4.4.5",
     "dexie-react-hooks": "^4.4.0",
     "framer-motion": "^13.1.1",
