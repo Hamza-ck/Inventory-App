@@ -19,12 +19,14 @@ import {
   FileText,
   FileDown,
   RotateCcw,
-  Megaphone
+  Megaphone,
+  Sparkles
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { advancedFilterMaterials } from '../lib/searchUtils'
 import Nav from '../components/Nav'
 import ProductReportModal from '../components/ProductReportModal'
+import BatchModelAddModal from '../components/BatchModelAddModal'
 
 const emptyForm = { sku: '', name: '', model: '', unit: 'pcs', current_qty: 0, reorder_threshold: 5 }
 
@@ -41,6 +43,9 @@ export default function MaterialsPage() {
 
   // Marketing Report Modal State
   const [isReportOpen, setIsReportOpen] = useState(false)
+
+  // Batch Model Stock Add Modal State
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
 
   // Erase All Quantities Safety Modal State
   const [isEraseModalOpen, setIsEraseModalOpen] = useState(false)
@@ -429,6 +434,17 @@ export default function MaterialsPage() {
             >
               <FileSpreadsheet className="w-4 h-4" />
               <span>Import Excel</span>
+            </button>
+
+            {/* Batch Model Qty Add Button */}
+            <button
+              type="button"
+              onClick={() => setIsBatchModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-sm shadow-indigo-500/20 transition-all cursor-pointer"
+              title="Add stock in bulk by pasting model names (e.g. A6PRO-15, OP F33-13)"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              <span>Batch Model Add</span>
             </button>
 
             {/* Single Add SKU Button */}
@@ -1043,6 +1059,14 @@ export default function MaterialsPage() {
         isOpen={isReportOpen}
         onClose={() => setIsReportOpen(false)}
         materials={materials}
+      />
+
+      {/* Smart Batch Model Add Modal */}
+      <BatchModelAddModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        materials={materials}
+        onSuccess={load}
       />
     </div>
   )

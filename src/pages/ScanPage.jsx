@@ -26,6 +26,7 @@ import QueueList from '../components/QueueList'
 import Nav from '../components/Nav'
 import AdvanceSearchModal from '../components/AdvanceSearchModal'
 import ProductReportModal from '../components/ProductReportModal'
+import BatchModelAddModal from '../components/BatchModelAddModal'
 
 export default function ScanPage() {
   const { user, isOwner } = useAuth()
@@ -50,6 +51,7 @@ export default function ScanPage() {
   const [isAdvanceSearchOpen, setIsAdvanceSearchOpen] = useState(false)
   const [isReportOpen, setIsReportOpen] = useState(false)
   const [reportProduct, setReportProduct] = useState('')
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
 
   // Scanned item popup modal state (displays Model Name as h3 and Product Name as h5)
   const [scannedPopup, setScannedPopup] = useState(null)
@@ -358,6 +360,16 @@ export default function ScanPage() {
             >
               <Search className="w-3.5 h-3.5 text-blue-600" />
               <span className="hidden sm:inline">Search</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsBatchModalOpen(true)}
+              className="px-3 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs rounded-xl shadow-xs transition-colors shrink-0 flex items-center gap-1.5"
+              title="Upload batch model quantities (e.g. A6PRO-15, OP F33-13)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="hidden sm:inline">Batch Models</span>
             </button>
           </form>
 
@@ -725,6 +737,14 @@ export default function ScanPage() {
         onClose={() => setIsReportOpen(false)}
         materials={materials}
         initialProductName={reportProduct}
+      />
+
+      {/* Smart Batch Model Add Modal */}
+      <BatchModelAddModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        materials={materials}
+        onSuccess={loadMaterials}
       />
     </div>
   )

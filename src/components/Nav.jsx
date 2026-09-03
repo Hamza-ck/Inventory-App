@@ -10,19 +10,22 @@ import {
   Search,
   FileText,
   Megaphone,
-  History
+  History,
+  Sparkles
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import AddUserModal from './AddUserModal'
 import AdvanceSearchModal from './AdvanceSearchModal'
 import ProductReportModal from './ProductReportModal'
+import BatchModelAddModal from './BatchModelAddModal'
 
 export default function Nav() {
   const { isOwner, signOut, user } = useAuth()
   const [isAddUserOpen, setIsAddUserOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [isReportOpen, setIsReportOpen] = useState(false)
+  const [isBatchOpen, setIsBatchOpen] = useState(false)
   const [reportProduct, setReportProduct] = useState('')
   const [materials, setMaterials] = useState([])
 
@@ -157,6 +160,17 @@ export default function Nav() {
               <kbd className="hidden lg:inline-block font-mono text-[10px] bg-slate-200 text-slate-500 px-1.5 py-0.2 rounded">
                 ⌘K
               </kbd>
+            </button>
+
+            {/* Batch Models Trigger */}
+            <button
+              type="button"
+              onClick={() => setIsBatchOpen(true)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50/70 hover:bg-indigo-100/70 border border-indigo-200/60 transition-all ml-1"
+              title="Batch Model Upload (e.g. A6PRO-15, OP F33-13)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Batch Models</span>
             </button>
           </nav>
 
@@ -310,6 +324,17 @@ export default function Nav() {
         onClose={() => setIsReportOpen(false)}
         materials={materials}
         initialProductName={reportProduct}
+      />
+
+      {/* Batch Model Upload Modal */}
+      <BatchModelAddModal
+        isOpen={isBatchOpen}
+        onClose={() => setIsBatchOpen(false)}
+        materials={materials}
+        onSuccess={() => {
+          loadMaterials()
+          window.location.reload()
+        }}
       />
     </>
   )
