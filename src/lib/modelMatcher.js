@@ -12,6 +12,7 @@ export const BRAND_ALIASES = {
   OPP: 'OPPO',
   RM: 'REALME',
   RLM: 'REALME',
+  REL: 'REALME',
   SAM: 'SAMSUNG',
   SMSG: 'SAMSUNG',
   IP: 'IPHONE',
@@ -45,11 +46,32 @@ export function toCompact(str) {
 }
 
 /**
- * Expand brand prefix if present (e.g., "OP F33" -> "OPPO F33")
+ * Expand brand prefix if present (e.g., "OP F33" -> "OPPO F33", "Opp/Rel F31" -> "OPPO / REALME F31")
  */
 export function expandBrandAliases(text) {
   if (!text) return ''
   const trimmed = text.trim()
+
+  // Handle compound brands with slash, e.g. "Opp/Rel F31" -> "OPPO / REALME F31"
+  if (trimmed.includes('/')) {
+    const parts = trimmed.split('/')
+    const firstPart = parts[0].trim()
+    const rest = parts.slice(1).join('/')
+
+    const upperFirst = firstPart.toUpperCase()
+    const expandedFirst = BRAND_ALIASES[upperFirst] || firstPart
+
+    const restTokens = rest.trim().split(/\s+/)
+    if (restTokens.length > 0) {
+      const restBrandUpper = restTokens[0].toUpperCase()
+      if (BRAND_ALIASES[restBrandUpper]) {
+        restTokens[0] = BRAND_ALIASES[restBrandUpper]
+      }
+      return `${expandedFirst} / ${restTokens.join(' ')}`
+    }
+    return `${expandedFirst} / ${rest}`
+  }
+
   const tokens = trimmed.split(/\s+/)
   if (tokens.length === 0) return trimmed
 
@@ -59,11 +81,15 @@ export function expandBrandAliases(text) {
     return tokens.join(' ')
   }
 
-  // Also check if prefix is attached, e.g. "OPF33" -> "OPPO F33"
+  // Only expand prefix if separated by digit, hyphen, underscore, colon, or space (e.g. OP33 or OP-F33)
+  // NEVER slice mid-word (e.g. Opp must not be sliced into OP + p)
   for (const [alias, fullBrand] of Object.entries(BRAND_ALIASES)) {
     if (firstUpper.startsWith(alias) && firstUpper.length > alias.length) {
-      const remainder = trimmed.slice(alias.length).trim()
-      return `${fullBrand} ${remainder}`
+      const charAfter = firstUpper[alias.length]
+      if (/\d|[-_:/]/.test(charAfter)) {
+        const remainder = trimmed.slice(alias.length).replace(/^[-_:/]+/, ' ').trim()
+        return `${fullBrand} ${remainder}`
+      }
     }
   }
 
@@ -368,19 +394,22 @@ export function detectProductSkuPrefix(productName, existingMaterials = []) {
  * If none exists, starts at "sil-2mm-0001".
  */
 export function getNextSequentialSku(prefix, existingMaterials = [], usedInBatch = new Set(), minDigits = 4) {
-  const cleanPrefix = (prefix || 'sku-').toLowerCase()
+  const cleanPrefix = (prefix || 'sku-').trim().toLowerCase()
+  const normalizedPrefix = cleanPrefix.replace(/[-_]/g, '')
   let maxNum = 0
   let padLength = minDigits
 
   const allSkus = [
-    ...existingMaterials.map((m) => (m.sku || '').toLowerCase()),
-    ...Array.from(usedInBatch).map((s) => s.toLowerCase()),
-  ]
+    ...existingMaterials.map((m) => (typeof m === 'string' ? m : m?.sku || '').trim().toLowerCase()),
+    ...Array.from(usedInBatch).map((s) => (s || '').trim().toLowerCase()),
+  ].filter(Boolean)
 
   for (const sku of allSkus) {
-    if (sku.startsWith(cleanPrefix)) {
-      const suffix = sku.slice(cleanPrefix.length)
-      const numMatch = suffix.match(/^(\d+)/)
+    const normalizedSku = sku.replace(/[-_]/g, '')
+    // Matches if it starts with the clean prefix or normalized prefix (ignoring dash/underscore variations)
+    if (sku.startsWith(cleanPrefix) || (normalizedPrefix && normalizedSku.startsWith(normalizedPrefix))) {
+      // Extract trailing digits
+      const numMatch = sku.match(/(\d+)$/)
       if (numMatch) {
         const num = parseInt(numMatch[1], 10)
         if (!isNaN(num) && num > maxNum) {

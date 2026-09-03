@@ -49,10 +49,36 @@ export default function BatchModelAddModal({ isOpen, onClose, materials = [], on
 function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
   const { user } = useAuth()
 
+  // Live materials state to guarantee up-to-date catalog and accurate sequential SKUs
+  const [liveMaterials, setLiveMaterials] = useState(materials)
+
+  // Fetch complete and latest materials from Supabase without 1000 row limits
+  useEffect(() => {
+    async function loadFreshMaterials() {
+      try {
+        const { data, error } = await supabase
+          .from('materials')
+          .select('*')
+          .range(0, 50000)
+          .order('name')
+        if (!error && data && data.length > 0) {
+          setLiveMaterials(data)
+        } else if (materials && materials.length > 0) {
+          setLiveMaterials(materials)
+        }
+      } catch (err) {
+        if (materials && materials.length > 0) {
+          setLiveMaterials(materials)
+        }
+      }
+    }
+    loadFreshMaterials()
+  }, [materials])
+
   // Distinct existing product names and counts
   const productSummary = useMemo(() => {
     const map = new Map()
-    materials.forEach((m) => {
+    liveMaterials.forEach((m) => {
       const name = (m.name || '').trim()
       if (!name) return
       map.set(name, (map.get(name) || 0) + 1)
@@ -60,7 +86,7 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
     const list = Array.from(map.entries()).map(([name, count]) => ({ name, count }))
     list.sort((a, b) => b.count - a.count)
     return list
-  }, [materials])
+  }, [liveMaterials])
 
   const distinctProductNames = useMemo(
     () => productSummary.map((p) => p.name),
@@ -75,7 +101,7 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
   // Target Material / Product Name
   const initialProduct = distinctProductNames.includes('2MM')
     ? '2MM'
-    : distinctProductNames[0] || 'Clear maxsafe'
+    : distinctProductNames[0] || 'Clear Magsafe'
   const [selectedProduct, setSelectedProduct] = useState(initialProduct)
   const [customProductInput, setCustomProductInput] = useState('')
   const [isCustomProduct, setIsCustomProduct] = useState(false)
@@ -85,21 +111,21 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
 
   // SKU Prefix (e.g. "mag-clear_mag-", "sil-2mm-")
   const [skuPrefix, setSkuPrefix] = useState(() =>
-    detectProductSkuPrefix(initialProduct, materials)
+    detectProductSkuPrefix(initialProduct, liveMaterials)
   )
 
   // Update SKU Prefix whenever active product changes
   useEffect(() => {
     if (effectiveProduct) {
-      const autoPrefix = detectProductSkuPrefix(effectiveProduct, materials)
+      const autoPrefix = detectProductSkuPrefix(effectiveProduct, liveMaterials)
       setSkuPrefix(autoPrefix)
     }
-  }, [effectiveProduct, materials])
+  }, [effectiveProduct, liveMaterials])
 
   // Sample SKU preview (e.g., sil-2mm-0001)
   const sampleNextSku = useMemo(() => {
-    return getNextSequentialSku(skuPrefix, materials)
-  }, [skuPrefix, materials])
+    return getNextSequentialSku(skuPrefix, liveMaterials)
+  }, [skuPrefix, liveMaterials])
 
   // Step 2 Review Items
   const [items, setItems] = useState([])
@@ -118,9 +144,9 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
   }
 
   // Handle Analyzing Input
-  function handleAnalyzeInput() {
+  async function handleAnalyzeInput() {
     if (!effectiveProduct) {
-      alert('Please select or enter which Material/Product these models belong to (e.g., 2MM, Clear maxsafe).')
+      alert('Please select or enter which Material/Product these models belong to (e.g., 2MM, Clear Magsafe).')
       return
     }
 
@@ -130,18 +156,36 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
       return
     }
 
+    // Refresh live materials with specific prefix items from Supabase to prevent any SKU collisions
+    let activeMaterials = liveMaterials
+    try {
+      const { data: dbPrefixItems } = await supabase
+        .from('materials')
+        .select('*')
+        .ilike('sku', `${skuPrefix.trim()}%`)
+      if (dbPrefixItems && dbPrefixItems.length > 0) {
+        const merged = new Map()
+        liveMaterials.forEach((m) => merged.set(m.sku.toLowerCase(), m))
+        dbPrefixItems.forEach((m) => merged.set(m.sku.toLowerCase(), m))
+        activeMaterials = Array.from(merged.values())
+        setLiveMaterials(activeMaterials)
+      }
+    } catch (e) {
+      console.warn('Direct SKU prefix fetch error:', e)
+    }
+
     const usedSkusInBatch = new Set()
 
     const reviewed = parsed.map((item) => {
       // Scoped matching specifically for the selected product/material!
-      const matchResult = matchModelToMaterials(item.rawModel, materials, effectiveProduct)
+      const matchResult = matchModelToMaterials(item.rawModel, activeMaterials, effectiveProduct)
       const isMatched = !!matchResult.bestMatch
       const isNewSku = !isMatched
 
       // Generate sequential SKU if new model
       let assignedSku = ''
       if (isNewSku) {
-        assignedSku = getNextSequentialSku(skuPrefix, materials, usedSkusInBatch)
+        assignedSku = getNextSequentialSku(skuPrefix, activeMaterials, usedSkusInBatch)
         usedSkusInBatch.add(assignedSku.toLowerCase())
       } else {
         assignedSku = matchResult.bestMatch.sku
@@ -190,13 +234,19 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
   // Toggle between "Link Existing" and "Create New SKU"
   function toggleMode(id) {
     setItems((prev) => {
-      const usedSkus = new Set(prev.filter((x) => x.id !== id && x.isNewSku).map((x) => x.newSku.toLowerCase()))
+      const usedSkus = new Set(
+        prev.filter((x) => x.id !== id && x.isNewSku).map((x) => (x.newSku || '').trim().toLowerCase())
+      )
       return prev.map((it) => {
         if (it.id !== id) return it
         const nextIsNew = !it.isNewSku
-        let nextSku = it.newSku
-        if (nextIsNew && (!nextSku || !nextSku.startsWith(skuPrefix))) {
-          nextSku = getNextSequentialSku(skuPrefix, materials, usedSkus)
+        let nextSku = ''
+        if (nextIsNew) {
+          // ALWAYS generate a FRESH unused sequential SKU, never reuse existing material's SKU
+          nextSku = getNextSequentialSku(skuPrefix, liveMaterials, usedSkus)
+        } else {
+          // Revert to matched material's SKU
+          nextSku = it.matchedMaterial ? it.matchedMaterial.sku : ''
         }
         return {
           ...it,
@@ -261,7 +311,7 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
           .filter((x) => x.id !== id && x.isNewSku)
           .map((x) => (x.newSku || '').trim().toLowerCase())
       )
-      const safeSku = getNextSequentialSku(skuPrefix, materials, usedSkus)
+      const safeSku = getNextSequentialSku(skuPrefix, liveMaterials, usedSkus)
       return prev.map((it) => (it.id === id ? { ...it, newSku: safeSku } : it))
     })
   }
@@ -272,9 +322,9 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
       const usedSkus = new Set()
       return prev.map((it) => {
         if (!it.isNewSku) return it
-        const conflict = checkSkuConflict(it.newSku, materials, prev, it.id)
+        const conflict = checkSkuConflict(it.newSku, liveMaterials, prev, it.id)
         if (conflict.isConflict) {
-          const safeSku = getNextSequentialSku(skuPrefix, materials, usedSkus)
+          const safeSku = getNextSequentialSku(skuPrefix, liveMaterials, usedSkus)
           usedSkus.add(safeSku.toLowerCase())
           return { ...it, newSku: safeSku }
         }
@@ -295,12 +345,12 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
     // Check if any verified item has an SKU that conflicts with existing catalog or another row
     const conflictingCount = items.filter((i) => {
       if (!i.isNewSku || !i.isVerified) return false
-      const { isConflict } = checkSkuConflict(i.newSku, materials, items, i.id)
+      const { isConflict } = checkSkuConflict(i.newSku, liveMaterials, items, i.id)
       return isConflict
     }).length
 
     return { total, matched, newSkus, verified, totalQty, conflictingCount }
-  }, [items, materials])
+  }, [items, liveMaterials])
 
   // Filtered materials for inline link changer
   const inlineSearchMaterials = useMemo(() => {
@@ -957,7 +1007,7 @@ function BatchModelAddModalContent({ onClose, materials = [], onSuccess }) {
                                 </div>
                                 <div className="col-span-2 sm:col-span-1">
                                   {(() => {
-                                    const conflict = checkSkuConflict(item.newSku, materials, items, item.id)
+                                    const conflict = checkSkuConflict(item.newSku, liveMaterials, items, item.id)
                                     return (
                                       <>
                                         <div className="flex items-center justify-between">
