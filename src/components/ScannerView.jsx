@@ -3,16 +3,82 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, ScanText } from 'lucide-react'
 
 const OCR_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'
+const OCR_INTERVAL_MS = 2200
+const DUPLICATE_COOLDOWN_MS = 6000
 
-function normalizeDetectedText(value) {
+function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim()
 }
 
-function isUsefulOcrText(value) {
-  const text = normalizeDetectedText(value)
-  if (!text || text.length > 24) return false
-  const compact = text.replace(/\s/g, '')
-  return /[a-z0-9]/i.test(compact) && compact.length >= 2
+function compactText(value) {
+  return normalizeText(value).replace(/[^a-z0-9]/gi, '').toUpperCase()
+}
+
+function isUsefulToken(value) {
+  const text = compactText(value)
+  return text.length >= 2 && text.length <= 12 && /[A-Z]/.test(text) && /[0-9]/.test(text)
+}
+
+function chooseCandidate(rawText) {
+  const source = normalizeText(rawText)
+  const pieces = source
+    .split(/[\n|,;:/\\]+/)
+    .flatMap((line) => line.split(/\s+/))
+    .map(compactText)
+    .filter(isUsefulToken)
+
+  const candidates = [...new Set(pieces)]
+  candidates.sort((a, b) => {
+    const aScore = Math.abs(a.length - 4) + (a.length > 9 ? 5 : 0)
+    const bScore = Math.abs(b.length - 4) + (b.length > 9 ? 5 : 0)
+    return aScore - bScore
+  })
+  return candidates[0] || null
+}
+
+function makeFingerprint(video) {
+  if (!video?.videoWidth || !video?.videoHeight) return null
+  const canvas = document.createElement('canvas')
+  canvas.width = 24
+  canvas.height = 14
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return null
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+  let hash = 0
+  for (let i = 0; i < data.length; i += 12) hash = (hash * 31 + data[i] + data[i + 1] + data[i + 2]) | 0
+  return hash
+}
+
+function buildOcrImage(video) {
+  const width = video.videoWidth || 1280
+  const height = video.videoHeight || 720
+  const cropWidth = Math.floor(width * 0.70)
+  const cropHeight = Math.floor(height * 0.34)
+  const sx = Math.floor((width - cropWidth) / 2)
+  const sy = Math.floor((height - cropHeight) / 2)
+  const scale = 3
+
+  const canvas = document.createElement('canvas')
+  canvas.width = cropWidth * scale
+  canvas.height = cropHeight * scale
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) throw new Error('Camera image could not be processed.')
+
+  ctx.imageSmoothingEnabled = true
+  ctx.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height)
+
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  for (let i = 0; i < image.data.length; i += 4) {
+    const gray = Math.round(image.data[i] * 0.299 + image.data[i + 1] * 0.587 + image.data[i + 2] * 0.114)
+    const value = gray > 178 ? 255 : gray < 82 ? 0 : Math.max(0, Math.min(255, (gray - 120) * 2 + 120))
+    image.data[i] = value
+    image.data[i + 1] = value
+    image.data[i + 2] = value
+    image.data[i + 3] = 255
+  }
+  ctx.putImageData(image, 0, 0)
+  return canvas
 }
 
 async function loadTesseract() {
@@ -26,6 +92,7 @@ async function loadTesseract() {
       existing.addEventListener('error', reject, { once: true })
       return
     }
+
     const script = document.createElement('script')
     script.src = OCR_SCRIPT_URL
     script.async = true
@@ -38,22 +105,6 @@ async function loadTesseract() {
   return window.Tesseract || null
 }
 
-function makeImageFingerprint(video) {
-  if (!video?.videoWidth || !video?.videoHeight) return null
-  const canvas = document.createElement('canvas')
-  canvas.width = 32
-  canvas.height = 18
-  const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) return null
-  context.drawImage(video, 0, 0, 32, 18)
-  const data = context.getImageData(0, 0, 32, 18).data
-  let hash = 0
-  for (let i = 0; i < data.length; i += 16) {
-    hash = (hash * 31 + data[i] + data[i + 1] + data[i + 2]) | 0
-  }
-  return hash
-}
-
 export default function ScannerView({ onScan }) {
   const videoRef = useRef(null)
   const streamRef = useRef(null)
@@ -61,49 +112,101 @@ export default function ScannerView({ onScan }) {
   const barcodeDetectorRef = useRef(null)
   const onScanRef = useRef(onScan)
   const ocrBusyRef = useRef(false)
+  const ocrPromiseRef = useRef(null)
   const lastCodeRef = useRef({ text: null, at: 0 })
-  const lastOcrAtRef = useRef(0)
   const lastOcrFingerprintRef = useRef(null)
-  const animationFrameRef = useRef(null)
-  const autoOcrTimerRef = useRef(null)
+  const barcodeFrameRef = useRef(null)
+  const ocrTimerRef = useRef(null)
+
   const [error, setError] = useState(null)
   const [hasTorch, setHasTorch] = useState(false)
   const [torchOn, setTorchOn] = useState(false)
   const [facingMode, setFacingMode] = useState('environment')
   const [isInitializing, setIsInitializing] = useState(true)
   const [isOcrRunning, setIsOcrRunning] = useState(false)
-  const [scannerHint, setScannerHint] = useState('Point at a supplier label, QR code or barcode')
+  const [scannerHint, setScannerHint] = useState('Point at the printed model label — scanning automatically')
+
+  useEffect(() => { onScanRef.current = onScan }, [onScan])
+
+  function emitDetected(value, source) {
+    const text = compactText(value)
+    if (!text) return false
+    const now = Date.now()
+    if (lastCodeRef.current.text === text && now - lastCodeRef.current.at < DUPLICATE_COOLDOWN_MS) return false
+
+    lastCodeRef.current = { text, at: now }
+    setScannerHint(source === 'ocr' ? `Detected printed label: ${text}` : `Detected code: ${text}`)
+    if (navigator.vibrate) { try { navigator.vibrate(35) } catch {} }
+    onScanRef.current?.(text)
+    return true
+  }
+
+  async function runOcr({ manual = false } = {}) {
+    if (ocrBusyRef.current || !videoRef.current || videoRef.current.readyState < 2) return false
+
+    const fingerprint = makeFingerprint(videoRef.current)
+    if (!manual && fingerprint !== null && fingerprint === lastOcrFingerprintRef.current) return false
+
+    ocrBusyRef.current = true
+    setIsOcrRunning(true)
+    if (manual) setScannerHint('Reading the supplier label…')
+
+    try {
+      if (!ocrPromiseRef.current) ocrPromiseRef.current = loadTesseract()
+      const tesseract = await ocrPromiseRef.current
+      if (!tesseract) throw new Error('OCR engine unavailable.')
+
+      const image = buildOcrImage(videoRef.current)
+      const result = await tesseract.recognize(image, 'eng', {
+        logger: () => {},
+        config: {
+          tessedit_pageseg_mode: '7',
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._',
+        },
+      })
+
+      const candidate = chooseCandidate(result?.data?.text)
+      const confidence = Number(result?.data?.confidence || 0)
+      lastOcrFingerprintRef.current = makeFingerprint(videoRef.current) ?? fingerprint
+
+      if (!candidate || confidence < 58) {
+        if (manual) setScannerHint('Could not read the label clearly — move closer and hold steady')
+        return false
+      }
+
+      emitDetected(candidate, 'ocr')
+      return true
+    } catch (err) {
+      console.error('OCR error:', err)
+      if (manual) setScannerHint(err?.message || 'OCR failed. Try better lighting.')
+      return false
+    } finally {
+      ocrBusyRef.current = false
+      setIsOcrRunning(false)
+    }
+  }
 
   useEffect(() => {
-    onScanRef.current = onScan
-  }, [onScan])
-
-  useEffect(() => {
-    let isMounted = true
+    let mounted = true
     setIsInitializing(true)
     setError(null)
     setTorchOn(false)
-    setScannerHint('Point at a supplier label, QR code or barcode')
+    setScannerHint('Starting camera…')
     lastOcrFingerprintRef.current = null
-    lastOcrAtRef.current = 0
 
     async function startCamera() {
       try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error('Camera access is not supported by this browser.')
-        }
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access is not supported by this browser.')
+
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: facingMode },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+          video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         })
-        if (!isMounted) {
+        if (!mounted) {
           stream.getTracks().forEach((track) => track.stop())
           return
         }
+
         streamRef.current = stream
         const track = stream.getVideoTracks()[0]
         trackRef.current = track
@@ -111,31 +214,26 @@ export default function ScannerView({ onScan }) {
           videoRef.current.srcObject = stream
           await videoRef.current.play()
         }
+
         const capabilities = typeof track.getCapabilities === 'function' ? track.getCapabilities() : {}
         setHasTorch(Boolean(capabilities?.torch))
+        ocrPromiseRef.current = loadTesseract().catch(() => null)
 
         if ('BarcodeDetector' in window) {
           try {
             const supported = typeof window.BarcodeDetector.getSupportedFormats === 'function'
               ? await window.BarcodeDetector.getSupportedFormats()
               : []
-            const preferred = [
-              'qr_code', 'code_128', 'code_39', 'code_93',
-              'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf',
-              'codabar', 'data_matrix', 'pdf417', 'aztec',
-            ]
+            const preferred = ['qr_code', 'code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'data_matrix', 'pdf417', 'aztec']
             const formats = supported.filter((format) => preferred.includes(format))
-            barcodeDetectorRef.current = formats.length
-              ? new window.BarcodeDetector({ formats })
-              : new window.BarcodeDetector()
-          } catch {
-            barcodeDetectorRef.current = null
-          }
+            barcodeDetectorRef.current = formats.length ? new window.BarcodeDetector({ formats }) : new window.BarcodeDetector()
+          } catch { barcodeDetectorRef.current = null }
         }
+
         setIsInitializing(false)
-        setError(null)
+        setScannerHint('Point at the printed model label — scanning automatically')
       } catch (err) {
-        if (!isMounted) return
+        if (!mounted) return
         console.error('Camera start error:', err)
         setIsInitializing(false)
         setError(err?.message || 'Camera permission denied or camera hardware unavailable.')
@@ -145,11 +243,11 @@ export default function ScannerView({ onScan }) {
     startCamera()
 
     return () => {
-      isMounted = false
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
-      if (autoOcrTimerRef.current) clearTimeout(autoOcrTimerRef.current)
-      animationFrameRef.current = null
-      autoOcrTimerRef.current = null
+      mounted = false
+      if (barcodeFrameRef.current) cancelAnimationFrame(barcodeFrameRef.current)
+      if (ocrTimerRef.current) clearTimeout(ocrTimerRef.current)
+      barcodeFrameRef.current = null
+      ocrTimerRef.current = null
       barcodeDetectorRef.current = null
       if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
@@ -159,170 +257,67 @@ export default function ScannerView({ onScan }) {
 
   useEffect(() => {
     let active = true
+    let detectionBusy = false
 
     async function scanBarcodes() {
-      if (!active || !barcodeDetectorRef.current || !videoRef.current || videoRef.current.readyState < 2) {
-        if (active) animationFrameRef.current = requestAnimationFrame(scanBarcodes)
+      if (!active) return
+      if (!barcodeDetectorRef.current || !videoRef.current || videoRef.current.readyState < 2) {
+        barcodeFrameRef.current = requestAnimationFrame(scanBarcodes)
         return
       }
+      if (detectionBusy) {
+        barcodeFrameRef.current = requestAnimationFrame(scanBarcodes)
+        return
+      }
+      detectionBusy = true
       try {
         const results = await barcodeDetectorRef.current.detect(videoRef.current)
-        const match = results?.find((result) => normalizeDetectedText(result.rawValue))
-        if (match?.rawValue) {
-          const text = normalizeDetectedText(match.rawValue)
-          const now = Date.now()
-          if (!(lastCodeRef.current.text === text && now - lastCodeRef.current.at < 2500)) {
-            lastCodeRef.current = { text, at: now }
-            lastOcrFingerprintRef.current = makeImageFingerprint(videoRef.current)
-            setScannerHint(`Detected ${match.format || 'code'}: ${text}`)
-            if (navigator.vibrate) { try { navigator.vibrate(40) } catch {} }
-            onScanRef.current?.(text)
-          }
-        }
+        const match = results?.find((item) => compactText(item.rawValue))
+        if (match?.rawValue) emitDetected(match.rawValue, 'barcode')
       } catch {
-        // Detection can fail transiently while the camera is moving.
+        // Ignore transient detector failures while the camera moves.
+      } finally {
+        detectionBusy = false
       }
-      if (active) animationFrameRef.current = requestAnimationFrame(scanBarcodes)
+      barcodeFrameRef.current = requestAnimationFrame(scanBarcodes)
     }
 
-    if (!isInitializing && !error) animationFrameRef.current = requestAnimationFrame(scanBarcodes)
+    if (!isInitializing && !error) barcodeFrameRef.current = requestAnimationFrame(scanBarcodes)
     return () => {
       active = false
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+      if (barcodeFrameRef.current) cancelAnimationFrame(barcodeFrameRef.current)
     }
   }, [isInitializing, error])
 
-  async function runOcr({ automatic = false } = {}) {
-    if (ocrBusyRef.current || !videoRef.current || videoRef.current.readyState < 2) return false
-    const fingerprint = makeImageFingerprint(videoRef.current)
-    const now = Date.now()
-    if (automatic && fingerprint !== null) {
-      if (fingerprint === lastOcrFingerprintRef.current && now - lastOcrAtRef.current < 5000) return false
-      if (now - lastOcrAtRef.current < 1800) return false
-    }
-
-    ocrBusyRef.current = true
-    lastOcrAtRef.current = now
-    setIsOcrRunning(true)
-    if (!automatic) setScannerHint('Reading printed model label…')
-
-    try {
-      const tesseract = await loadTesseract()
-      if (!tesseract) throw new Error('OCR engine unavailable.')
-
-      const canvas = document.createElement('canvas')
-      const source = videoRef.current
-      const width = source.videoWidth || 1280
-      const height = source.videoHeight || 720
-      const cropWidth = Math.floor(width * 0.86)
-      const cropHeight = Math.floor(height * 0.52)
-      const sx = Math.floor((width - cropWidth) / 2)
-      const sy = Math.floor((height - cropHeight) / 2)
-      canvas.width = cropWidth
-      canvas.height = cropHeight
-      const context = canvas.getContext('2d', { willReadFrequently: true })
-      if (!context) throw new Error('Camera image could not be processed.')
-      context.drawImage(source, sx, sy, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight)
-
-      // Improve small black-on-white supplier labels before OCR.
-      const image = context.getImageData(0, 0, canvas.width, canvas.height)
-      for (let i = 0; i < image.data.length; i += 4) {
-        const gray = Math.round(image.data[i] * 0.299 + image.data[i + 1] * 0.587 + image.data[i + 2] * 0.114)
-        const boosted = gray > 155 ? 255 : gray < 90 ? 0 : gray
-        image.data[i] = boosted
-        image.data[i + 1] = boosted
-        image.data[i + 2] = boosted
-      }
-      context.putImageData(image, 0, 0)
-
-      const result = await tesseract.recognize(canvas, 'eng', {
-        logger: () => {},
-        config: {
-          tessedit_pageseg_mode: '6',
-          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._',
-        },
-      })
-
-      const rawText = String(result?.data?.text || '')
-      const lines = rawText
-        .split(/[\n|]+/)
-        .map(normalizeDetectedText)
-        .filter(isUsefulOcrText)
-
-      const words = rawText
-        .split(/\s+/)
-        .map(normalizeDetectedText)
-        .filter(isUsefulOcrText)
-
-      const candidates = [...new Set([...lines, ...words])]
-      const candidate = candidates.sort((a, b) => {
-        const aCompact = a.replace(/[^a-z0-9]/gi, '')
-        const bCompact = b.replace(/[^a-z0-9]/gi, '')
-        const aScore = (aCompact.length >= 2 && aCompact.length <= 12 ? 0 : 5) + Math.abs(aCompact.length - 4)
-        const bScore = (bCompact.length >= 2 && bCompact.length <= 12 ? 0 : 5) + Math.abs(bCompact.length - 4)
-        return aScore - bScore
-      })[0]
-
-      if (!candidate) {
-        if (!automatic) setScannerHint('No clear model text found — move closer and improve lighting')
-        return false
-      }
-
-      const resultFingerprint = makeImageFingerprint(videoRef.current)
-      lastOcrFingerprintRef.current = resultFingerprint ?? fingerprint
-      const scanNow = Date.now()
-      if (!(lastCodeRef.current.text === candidate && scanNow - lastCodeRef.current.at < 3000)) {
-        lastCodeRef.current = { text: candidate, at: scanNow }
-        if (navigator.vibrate) { try { navigator.vibrate(40) } catch {} }
-        onScanRef.current?.(candidate)
-      }
-      setScannerHint(`Detected printed label: ${candidate}`)
-      return true
-    } catch (err) {
-      console.error('OCR error:', err)
-      if (!automatic) setScannerHint(err?.message || 'OCR failed. Try better lighting and a closer label.')
-      return false
-    } finally {
-      ocrBusyRef.current = false
-      setIsOcrRunning(false)
-    }
-  }
-
   useEffect(() => {
+    if (isInitializing || error) return undefined
     let active = true
 
     async function autoOcrLoop() {
       if (!active) return
-      if (!isInitializing && !error && !ocrBusyRef.current && videoRef.current?.readyState >= 2) {
-        await runOcr({ automatic: true })
-      }
-      if (active) autoOcrTimerRef.current = setTimeout(autoOcrLoop, 2200)
+      await runOcr()
+      if (active) ocrTimerRef.current = setTimeout(autoOcrLoop, OCR_INTERVAL_MS)
     }
 
-    if (!isInitializing && !error) autoOcrTimerRef.current = setTimeout(autoOcrLoop, 1200)
+    ocrTimerRef.current = setTimeout(autoOcrLoop, 1200)
     return () => {
       active = false
-      if (autoOcrTimerRef.current) clearTimeout(autoOcrTimerRef.current)
-      autoOcrTimerRef.current = null
+      if (ocrTimerRef.current) clearTimeout(ocrTimerRef.current)
+      ocrTimerRef.current = null
     }
-  }, [isInitializing, error])
+  }, [isInitializing, error, facingMode])
 
   async function toggleTorch() {
     const track = trackRef.current
-    if (!track || typeof track.applyConstraints !== 'function') return
+    if (!track?.applyConstraints) return
     try {
       const next = !torchOn
       await track.applyConstraints({ advanced: [{ torch: next }] })
       setTorchOn(next)
-    } catch (e) {
-      console.warn('Torch toggle failed:', e)
-    }
+    } catch (err) { console.warn('Torch toggle failed:', err) }
   }
 
-  function flipCamera() {
-    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
-  }
-
+  function flipCamera() { setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment')) }
   function retryCamera() {
     setError(null)
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
@@ -330,12 +325,7 @@ export default function ScannerView({ onScan }) {
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.3 }}
-      className="relative w-full aspect-[4/3] sm:aspect-[16/10] bg-slate-950 rounded-2xl md:rounded-3xl overflow-hidden shadow-xl shadow-slate-900/10 border border-slate-800 mb-6"
-    >
+    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.3 }} className="relative w-full aspect-[4/3] sm:aspect-[16/10] bg-slate-950 rounded-2xl md:rounded-3xl overflow-hidden shadow-xl shadow-slate-900/10 border border-slate-800 mb-6">
       <video ref={videoRef} className="w-full h-full object-cover block" muted playsInline autoPlay />
 
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
@@ -344,46 +334,27 @@ export default function ScannerView({ onScan }) {
           <div className="absolute top-0 right-0 w-7 h-7 border-t-3 border-r-3 border-sky-400 rounded-tr-xl" />
           <div className="absolute bottom-0 left-0 w-7 h-7 border-b-3 border-l-3 border-sky-400 rounded-bl-xl" />
           <div className="absolute bottom-0 right-0 w-7 h-7 border-b-3 border-r-3 border-sky-400 rounded-br-xl" />
-          <motion.div
-            animate={{ top: ['5%', '92%', '5%'], opacity: [0.3, 0.9, 0.3] }}
-            transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
-            className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent shadow-[0_0_12px_#38bdf8]"
-          />
+          <motion.div animate={{ top: ['5%', '92%', '5%'], opacity: [0.25, 0.9, 0.25] }} transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }} className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent shadow-[0_0_12px_#38bdf8]" />
         </div>
-        <div className="absolute bottom-4 bg-slate-900/80 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-white text-xs font-medium tracking-wide flex items-center gap-1.5 shadow-lg">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          {scannerHint}
+        <div className="absolute bottom-4 bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-white text-xs font-medium tracking-wide flex items-center gap-1.5 shadow-lg max-w-[90%]">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span className="truncate">{scannerHint}</span>
         </div>
       </div>
 
       <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10 pointer-events-auto">
-        <button
-          type="button"
-          onClick={() => runOcr({ automatic: false })}
-          disabled={isOcrRunning || isInitializing || Boolean(error)}
-          title="Read printed model text"
-          className="h-10 px-3 rounded-full flex items-center justify-center gap-1.5 bg-slate-900/70 text-slate-100 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md text-xs font-semibold"
-        >
+        <button type="button" onClick={() => runOcr({ manual: true })} disabled={isOcrRunning || isInitializing || Boolean(error)} title="Read printed model text now" className="h-10 px-3 rounded-full flex items-center justify-center gap-1.5 bg-slate-900/70 text-slate-100 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md text-xs font-semibold">
           <ScanText className="w-4 h-4" />
-          {isOcrRunning ? 'Reading…' : 'Read text'}
+          {isOcrRunning ? 'Reading…' : 'Read now'}
         </button>
+
         <div className="flex items-center gap-2">
           {hasTorch && (
-            <button
-              type="button"
-              onClick={toggleTorch}
-              title={torchOn ? 'Turn Flash Off' : 'Turn Flash On'}
-              className={`w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${torchOn ? 'bg-amber-500 text-white border-amber-400 shadow-lg shadow-amber-500/30' : 'bg-slate-900/70 text-slate-200 border-white/20 hover:bg-slate-800/80 active:scale-95'}`}
-            >
+            <button type="button" onClick={toggleTorch} title={torchOn ? 'Turn Flash Off' : 'Turn Flash On'} className={`w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${torchOn ? 'bg-amber-500 text-white border-amber-400 shadow-lg shadow-amber-500/30' : 'bg-slate-900/70 text-slate-200 border-white/20 hover:bg-slate-800/80 active:scale-95'}`}>
               {torchOn ? <Zap className="w-5 h-5 fill-current" /> : <ZapOff className="w-5 h-5" />}
             </button>
           )}
-          <button
-            type="button"
-            onClick={flipCamera}
-            title="Switch Camera"
-            className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-900/70 text-slate-200 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 active:scale-95 transition-all shadow-md"
-          >
+          <button type="button" onClick={flipCamera} title="Switch Camera" className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-900/70 text-slate-200 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 active:scale-95 transition-all shadow-md">
             <RefreshCw className="w-4.5 h-4.5" />
           </button>
         </div>
@@ -398,24 +369,11 @@ export default function ScannerView({ onScan }) {
 
       <AnimatePresence>
         {error && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-30"
-          >
-            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mb-3">
-              <AlertCircle className="w-6 h-6" />
-            </div>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-30">
+            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mb-3"><AlertCircle className="w-6 h-6" /></div>
             <h4 className="text-rose-400 font-semibold text-base mb-1">Camera Feed Unavailable</h4>
             <p className="text-slate-400 text-xs max-w-xs mb-4">{error}</p>
-            <button
-              type="button"
-              onClick={retryCamera}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-xl border border-slate-700 active:scale-95 transition-all flex items-center gap-1.5"
-            >
-              <Camera className="w-3.5 h-3.5" /> Retry Camera
-            </button>
+            <button type="button" onClick={retryCamera} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-xl border border-slate-700 active:scale-95 transition-all flex items-center gap-1.5"><Camera className="w-3.5 h-3.5" /> Retry Camera</button>
           </motion.div>
         )}
       </AnimatePresence>
