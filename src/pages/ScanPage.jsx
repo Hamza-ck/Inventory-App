@@ -21,6 +21,7 @@ import { supabase } from '../lib/supabaseClient'
 import { db, addToQueue, updateQueueQty } from '../lib/db'
 import { submitQueue } from '../lib/sync'
 import { advancedFilterMaterials } from '../lib/searchUtils'
+import { filterMaterialsByCanonicalModel, resolveModelAlias, resolveSupplierModelLabel, saveModelAlias, saveSupplierModelLabel } from '../lib/modelLabelResolver'
 import ScannerView from '../components/ScannerView'
 import QueueList from '../components/QueueList'
 import Nav from '../components/Nav'
@@ -44,6 +45,12 @@ export default function ScanPage() {
   const [isManualFocused, setIsManualFocused] = useState(false)
   const manualSearchRef = useRef(null)
 
+  // Supplier-label intelligence states
+  const [materialPicker, setMaterialPicker] = useState(null)
+  const [unknownLabel, setUnknownLabel] = useState(null)
+  const [unknownLabelModel, setUnknownLabelModel] = useState('')
+  const [savingLabel, setSavingLabel] = useState(false)
+
   // Materials state for live advanced search
   const [materials, setMaterials] = useState([])
 
@@ -53,7 +60,7 @@ export default function ScanPage() {
   const [reportProduct, setReportProduct] = useState('')
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
 
-  // Scanned item popup modal state (displays Model Name as h3 and Product Name as h5)
+  // Scanned item popup modal state
   const [scannedPopup, setScannedPopup] = useState(null)
 
   useEffect(() => {
@@ -93,6 +100,67 @@ export default function ScanPage() {
     return advancedFilterMaterials(materials, manualSku.trim()).slice(0, 5)
   }, [materials, manualSku])
 
+  const modelOptions = useMemo(() => {
+    const seen = new Map()
+    materials.forEach((m) => {
+      const model = String(m.model || '').trim()
+      if (!model) return
+      const key = model.toLowerCase().replace(/[^a-z0-9]+/g, '')
+      if (!seen.has(key)) seen.set(key, model)
+    })
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b))
+  }, [materials])
+
+  function queueMaterial(material, currentDirection, rawLabel = null) {
+    return addToQueue({
+      sku: material.sku,
+      name: material.name,
+      model: material.model,
+      direction: currentDirection,
+    }).then((queueId) => {
+      setScannedPopup({
+        queueId,
+        sku: material.sku,
+        supplierLabel: rawLabel,
+        name: material.name || 'Unregistered Product',
+        model: material.model || 'Standard Model',
+        unit: material.unit || 'pcs',
+        direction: currentDirection,
+        qty: 1,
+      })
+      setStatusType('success')
+      setStatus(
+        `Scanned: "${material.model || material.name}" ${
+          rawLabel ? `(label ${rawLabel}) ` : ''
+        }(${currentDirection === 'in' ? 'Inward' : 'Outward'})`
+      )
+    })
+  }
+
+  async function resolveModelToMaterials(rawLabel, canonicalModel, currentDirection) {
+    const candidates = filterMaterialsByCanonicalModel(materials, canonicalModel)
+
+    if (candidates.length === 0) {
+      setStatusType('warning')
+      setStatus(`Label "${rawLabel}" is linked to model "${canonicalModel}", but no material records exist for that model.`)
+      return
+    }
+
+    if (candidates.length === 1) {
+      await queueMaterial(candidates[0], currentDirection, rawLabel)
+      return
+    }
+
+    setMaterialPicker({
+      rawLabel,
+      canonicalModel,
+      candidates,
+      direction: currentDirection,
+    })
+    setStatusType('info')
+    setStatus(`Model "${canonicalModel}" found. Select the material for label "${rawLabel}".`)
+  }
+
   // Stable scan handler
   const handleScan = useCallback(async (rawSku) => {
     const sku = rawSku.trim()
@@ -100,63 +168,67 @@ export default function ScanPage() {
     const currentDirection = directionRef.current
     const ownerStatus = isOwnerRef.current
 
+    // First preserve the existing internal-SKU workflow.
     let materialData = null
     try {
       const { data } = await supabase
         .from('materials')
-        .select('name, model, unit, current_qty')
+        .select('sku, name, model, unit, current_qty')
         .eq('sku', sku)
-        .single()
+        .maybeSingle()
       materialData = data
       if (data?.name) {
-        await db.materialsCache.put({ 
-          sku, 
-          name: data.name, 
+        await db.materialsCache.put({
+          sku,
+          name: data.name,
           model: data.model || '',
-          updatedAt: new Date().toISOString() 
+          currentQty: data.current_qty,
+          updatedAt: new Date().toISOString(),
         })
       }
     } catch {
       const cached = await db.materialsCache.get(sku)
       if (cached?.name) {
-        materialData = { name: cached.name, model: cached.model || '' }
+        materialData = { sku, name: cached.name, model: cached.model || '', unit: 'pcs' }
       }
     }
 
-    const name = materialData?.name ?? null
-    const model = materialData?.model ?? ''
-    const unit = materialData?.unit ?? 'pcs'
-
-    if (!name && ownerStatus) {
-      setUnknownSku(sku)
-      setQuickAdd({ name: '', model: '' })
-      setStatusType('warning')
-      setStatus(`Unregistered SKU: "${sku}". Register material details below.`)
+    if (materialData?.name) {
+      await queueMaterial(materialData, currentDirection)
       return
     }
 
-    // Add to queue
-    const queueId = await addToQueue({ sku, name, model, direction: currentDirection })
-
-    // Trigger visual pop-up modal showing Model Name (h3) and Product Name (h5)
-    setScannedPopup({
-      queueId,
-      sku,
-      name: name || 'Unregistered Product',
-      model: model || 'Standard Model',
-      unit,
-      direction: currentDirection,
-      qty: 1,
-    })
-
-    if (name) {
-      setStatusType('success')
-      setStatus(`Scanned: "${model || name}" (${currentDirection === 'in' ? 'Inward' : 'Outward'})`)
-    } else {
-      setStatusType('warning')
-      setStatus(`Added unregistered SKU (${sku})`)
+    // Then resolve a supplier label -> canonical model.
+    const labelMatch = await resolveSupplierModelLabel(supabase, sku)
+    if (labelMatch?.canonicalModel) {
+      await resolveModelToMaterials(sku, labelMatch.canonicalModel, currentDirection)
+      return
     }
-  }, [])
+
+    // Finally allow a saved alias such as "OP F31" -> "OPPO F31".
+    const aliasMatch = await resolveModelAlias(supabase, sku)
+    if (aliasMatch?.canonicalModel) {
+      await resolveModelToMaterials(sku, aliasMatch.canonicalModel, currentDirection)
+      return
+    }
+
+    // Unknown supplier label: only the owner in inward mode may teach the mapping.
+    if (ownerStatus && currentDirection === 'in') {
+      setUnknownLabel(sku)
+      setUnknownLabelModel('')
+      setStatusType('warning')
+      setStatus(`Unknown supplier label: "${sku}". Link it to the correct model first.`)
+      return
+    }
+
+    // Do not let outward scans create arbitrary mappings.
+    setStatusType('warning')
+    setStatus(
+      currentDirection === 'out'
+        ? `Unregistered supplier label "${sku}". Register/map it during inward stock entry first.`
+        : `Unregistered label "${sku}".`
+    )
+  }, [materials])
 
   function handleManualSubmit(e) {
     e.preventDefault()
@@ -170,6 +242,30 @@ export default function ScanPage() {
     handleScan(m.sku)
     setManualSku('')
     setIsManualFocused(false)
+  }
+
+  async function handleUnknownLabelSave(e) {
+    e.preventDefault()
+    const label = unknownLabel?.trim()
+    const canonicalModel = unknownLabelModel.trim()
+    if (!label || !canonicalModel || savingLabel) return
+
+    setSavingLabel(true)
+    const { error: labelError } = await saveSupplierModelLabel(supabase, label, canonicalModel)
+    if (labelError) {
+      setSavingLabel(false)
+      setStatusType('error')
+      setStatus(`Could not save label mapping: ${labelError.message}`)
+      return
+    }
+
+    // Also teach the normalized model alias so future manual terminology can resolve.
+    await saveModelAlias(supabase, canonicalModel, canonicalModel)
+    setUnknownLabel(null)
+    setSavingLabel(false)
+    setStatusType('success')
+    setStatus(`Saved: "${label}" → "${canonicalModel}". Now select the material.`)
+    await resolveModelToMaterials(label, canonicalModel, directionRef.current)
   }
 
   async function handleQuickAdd(e) {
@@ -200,8 +296,7 @@ export default function ScanPage() {
       model: quickAdd.model.trim() || null,
       direction,
     })
-    
-    // Show popup
+
     setScannedPopup({
       queueId,
       sku: unknownSku,
@@ -254,14 +349,13 @@ export default function ScanPage() {
       <Nav />
 
       <main className="w-full max-w-2xl mx-auto px-4 pt-4 pb-28 sm:py-8 flex-1">
-        {/* Header and Mode Indicator */}
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
               <QrCode className="w-6 h-6 text-blue-600" />
               QR Scanner
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500">Scan barcodes or search models in real-time</p>
+            <p className="text-xs sm:text-sm text-slate-500">Scan supplier labels, barcodes or search models in real-time</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -282,7 +376,6 @@ export default function ScanPage() {
           </div>
         </div>
 
-        {/* Direction Segmented Toggle Buttons */}
         <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-200/80 rounded-2xl border border-slate-300/60 mb-4 shadow-inner">
           <button
             type="button"
@@ -311,17 +404,15 @@ export default function ScanPage() {
           </button>
         </div>
 
-        {/* Camera Scanner View */}
         <ScannerView onScan={handleScan} />
 
-        {/* Advance Search & Live Barcode / Model Input for Employees */}
         <div ref={manualSearchRef} className="relative mb-4 z-20">
           <form onSubmit={handleManualSubmit} className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder='Search Model Name, Product or SKU (e.g. "2mm", "Vivo")...'
+                placeholder='Search Model Name, Product or SKU (e.g. "2mm", "Vivo", "F31")...'
                 value={manualSku}
                 onFocus={() => setIsManualFocused(true)}
                 onChange={(e) => {
@@ -373,7 +464,6 @@ export default function ScanPage() {
             </button>
           </form>
 
-          {/* Live Search Suggestions Dropdown */}
           <AnimatePresence>
             {isManualFocused && liveSuggestions.length > 0 && (
               <motion.div
@@ -431,7 +521,6 @@ export default function ScanPage() {
           </AnimatePresence>
         </div>
 
-        {/* Status Toast Banner */}
         <AnimatePresence>
           {status && (
             <motion.div
@@ -467,9 +556,127 @@ export default function ScanPage() {
           )}
         </AnimatePresence>
 
-        {/* ======================================================== */}
-        {/* SCAN POP-UP: Shows Model Name(h3) & Product Name(h5)     */}
-        {/* ======================================================== */}
+        {/* Material selection after a supplier label resolves to a model. */}
+        <AnimatePresence>
+          {materialPicker && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.94, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.94, y: 16 }}
+                className="bg-white rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl border border-slate-200"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-blue-600 mb-1">Supplier label recognized</div>
+                    <h3 className="text-xl font-black text-slate-900">{materialPicker.canonicalModel}</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Label <span className="font-mono font-bold text-slate-800">{materialPicker.rawLabel}</span> can represent multiple materials.
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setMaterialPicker(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-xl">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                  {materialPicker.candidates.map((m) => {
+                    const qty = Number(m.current_qty) || 0
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={async () => {
+                          setMaterialPicker(null)
+                          await queueMaterial(m, materialPicker.direction, materialPicker.rawLabel)
+                        }}
+                        className="w-full p-3.5 rounded-2xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-left transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="font-extrabold text-slate-900">{m.name}</div>
+                            <div className="text-xs text-slate-500 mt-0.5">SKU {m.sku}{m.unit ? ` • ${m.unit}` : ''}</div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="font-black text-slate-900">{qty.toLocaleString()}</div>
+                            <div className="text-[10px] font-semibold text-slate-400">current stock</div>
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Teach a new supplier label during inward. */}
+        <AnimatePresence>
+          {unknownLabel && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.94, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.94, y: 16 }}
+                className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-200"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-amber-500" />
+                      Teach Supplier Label
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded">{unknownLabel}</span>
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setUnknownLabel(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-xl">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleUnknownLabelSave} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Canonical model</label>
+                    <input
+                      list="supplier-model-options"
+                      value={unknownLabelModel}
+                      onChange={(e) => setUnknownLabelModel(e.target.value)}
+                      placeholder="e.g. OPPO F31"
+                      autoFocus
+                      required
+                      className="w-full px-3.5 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    />
+                    <datalist id="supplier-model-options">
+                      {modelOptions.map((model) => <option key={model} value={model} />)}
+                    </datalist>
+                    <p className="text-[11px] text-slate-500 mt-1.5">Choose the phone/model identity, not the material. Material is selected next.</p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={!unknownLabelModel.trim() || savingLabel}
+                    className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl disabled:opacity-50"
+                  >
+                    {savingLabel ? 'Saving mapping...' : 'Save Model Mapping'}
+                  </button>
+                </form>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <AnimatePresence>
           {scannedPopup && (
             <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4">
@@ -480,101 +687,59 @@ export default function ScanPage() {
                 transition={{ type: 'spring', damping: 25, stiffness: 350 }}
                 className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-sm shadow-2xl border border-slate-200 text-center relative overflow-hidden"
               >
-                {/* Close Button */}
-                <button
-                  type="button"
-                  onClick={() => setScannedPopup(null)}
-                  className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
-                >
+                <button type="button" onClick={() => setScannedPopup(null)} className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors">
                   <X className="w-5 h-5" />
                 </button>
 
-                {/* Scan Direction Badge & Icon */}
-                <div
-                  className={`mx-auto w-14 h-14 rounded-2xl flex items-center justify-center mb-3 shadow-md ${
-                    scannedPopup.direction === 'in'
-                      ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                      : 'bg-rose-100 text-rose-700 border border-rose-200'
-                  }`}
-                >
-                  {scannedPopup.direction === 'in' ? (
-                    <ArrowDownCircle className="w-8 h-8" />
-                  ) : (
-                    <ArrowUpCircle className="w-8 h-8" />
-                  )}
+                <div className={`mx-auto w-14 h-14 rounded-2xl flex items-center justify-center mb-3 shadow-md ${
+                  scannedPopup.direction === 'in'
+                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                    : 'bg-rose-100 text-rose-700 border border-rose-200'
+                }`}>
+                  {scannedPopup.direction === 'in' ? <ArrowDownCircle className="w-8 h-8" /> : <ArrowUpCircle className="w-8 h-8" />}
                 </div>
 
                 <div className="mb-1">
-                  <span
-                    className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
-                      scannedPopup.direction === 'in'
-                        ? 'bg-emerald-50 text-emerald-800'
-                        : 'bg-rose-50 text-rose-800'
-                    }`}
-                  >
+                  <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+                    scannedPopup.direction === 'in' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
+                  }`}>
                     {scannedPopup.direction === 'in' ? 'Stock Inward' : 'Stock Outward'}
                   </span>
                 </div>
 
-                {/* MODEL NAME as <h3> */}
                 <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight mt-1 mb-0.5">
                   {scannedPopup.model || 'Standard Variant / Model'}
                 </h3>
 
-                {/* PRODUCT NAME as <h5> */}
                 <h5 className="text-sm font-semibold text-slate-500 mb-4">
                   {scannedPopup.name}
                 </h5>
 
-                {/* Quantity Stepper Controller */}
-                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 mb-4">
-                  <div className="text-[11px] font-bold text-slate-400 uppercase mb-2">
-                    Scanned Quantity ({scannedPopup.unit || 'pcs'})
-                  </div>
+                {scannedPopup.supplierLabel && (
+                  <div className="text-[11px] text-slate-400 mb-3">Supplier label: <span className="font-mono font-semibold text-slate-600">{scannedPopup.supplierLabel}</span></div>
+                )}
 
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 mb-4">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase mb-2">Scanned Quantity ({scannedPopup.unit || 'pcs'})</div>
                   <div className="flex items-center justify-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => adjustPopupQty(-1)}
-                      className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center text-slate-700 font-bold hover:bg-slate-100 active:scale-95 transition-all"
-                    >
+                    <button type="button" onClick={() => adjustPopupQty(-1)} className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center text-slate-700 font-bold hover:bg-slate-100 active:scale-95 transition-all">
                       <Minus className="w-4 h-4" />
                     </button>
-
-                    <div className="w-16 text-center font-black text-2xl text-slate-900">
-                      {scannedPopup.qty}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => adjustPopupQty(1)}
-                      className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center text-slate-700 font-bold hover:bg-slate-100 active:scale-95 transition-all"
-                    >
+                    <div className="w-16 text-center font-black text-2xl text-slate-900">{scannedPopup.qty}</div>
+                    <button type="button" onClick={() => adjustPopupQty(1)} className="w-10 h-10 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center text-slate-700 font-bold hover:bg-slate-100 active:scale-95 transition-all">
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
-
-                  {/* Preset chips */}
                   <div className="flex items-center justify-center gap-2 mt-2.5">
                     {[5, 10, 25, 50].map((num) => (
-                      <button
-                        key={num}
-                        type="button"
-                        onClick={() => adjustPopupQty(num)}
-                        className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors"
-                      >
+                      <button key={num} type="button" onClick={() => adjustPopupQty(num)} className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors">
                         +{num}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Action button */}
-                <button
-                  type="button"
-                  onClick={() => setScannedPopup(null)}
-                  className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-600/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                >
+                <button type="button" onClick={() => setScannedPopup(null)} className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-600/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
                   <Check className="w-4 h-4" />
                   <span>Done / Scan Next</span>
                 </button>
@@ -583,7 +748,7 @@ export default function ScanPage() {
           )}
         </AnimatePresence>
 
-        {/* Quick Add Form Modal for Unregistered QR Codes */}
+        {/* Existing internal SKU quick-add flow, retained for normal barcode registration. */}
         <AnimatePresence>
           {unknownSku && (
             <motion.div
@@ -606,62 +771,24 @@ export default function ScanPage() {
                     </h3>
                     <p className="text-xs text-slate-500 mt-1">
                       SKU barcode:{' '}
-                      <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded">
-                        {unknownSku}
-                      </span>
+                      <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded">{unknownSku}</span>
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setUnknownSku(null)}
-                    className="p-1 rounded-lg text-slate-400 hover:bg-slate-100"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+                  <button type="button" onClick={() => setUnknownSku(null)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100"><X className="w-5 h-5" /></button>
                 </div>
 
                 <form onSubmit={handleQuickAdd} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Material / Product Name *
-                    </label>
-                    <input
-                      placeholder="e.g. Cotton T-Shirt White"
-                      value={quickAdd.name}
-                      onChange={(e) => setQuickAdd({ ...quickAdd, name: e.target.value })}
-                      required
-                      autoFocus
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    />
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Material / Product Name *</label>
+                    <input placeholder="e.g. Cotton T-Shirt White" value={quickAdd.name} onChange={(e) => setQuickAdd({ ...quickAdd, name: e.target.value })} required autoFocus className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
                   </div>
-
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Model / Variant (Optional)
-                    </label>
-                    <input
-                      placeholder="e.g. Size L / SKU-01"
-                      value={quickAdd.model}
-                      onChange={(e) => setQuickAdd({ ...quickAdd, model: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    />
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Model / Variant (Optional)</label>
+                    <input placeholder="e.g. Size L / SKU-01" value={quickAdd.model} onChange={(e) => setQuickAdd({ ...quickAdd, model: e.target.value })} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600" />
                   </div>
-
                   <div className="flex gap-2 pt-2">
-                    <button
-                      type="submit"
-                      disabled={addingMaterial}
-                      className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-600/30 transition-all disabled:opacity-50"
-                    >
-                      {addingMaterial ? 'Registering...' : 'Register & Add to Queue'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setUnknownSku(null)}
-                      className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm rounded-xl"
-                    >
-                      Cancel
-                    </button>
+                    <button type="submit" disabled={addingMaterial} className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-600/30 transition-all disabled:opacity-50">{addingMaterial ? 'Registering...' : 'Register & Add to Queue'}</button>
+                    <button type="button" onClick={() => setUnknownSku(null)} className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm rounded-xl">Cancel</button>
                   </div>
                 </form>
               </motion.div>
@@ -669,7 +796,6 @@ export default function ScanPage() {
           )}
         </AnimatePresence>
 
-        {/* Scan Queue Section Header */}
         <div className="flex items-center justify-between mb-3 mt-6">
           <div className="flex items-center gap-2">
             <Package className="w-5 h-5 text-slate-700" />
@@ -682,41 +808,21 @@ export default function ScanPage() {
           )}
         </div>
 
-        {/* Queue List Cards */}
         <QueueList />
 
-        {/* Floating/Sticky Submit Queue Action Bar */}
         {queueItems.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="sticky bottom-20 sm:bottom-6 z-30 pt-3"
-          >
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={submitting || validItemsCount === 0}
-              className="w-full py-4 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-base rounded-2xl shadow-xl shadow-blue-600/30 active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2.5"
-            >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="sticky bottom-20 sm:bottom-6 z-30 pt-3">
+            <button type="button" onClick={handleSubmit} disabled={submitting || validItemsCount === 0} className="w-full py-4 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-base rounded-2xl shadow-xl shadow-blue-600/30 active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2.5">
               {submitting ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Syncing Queue to Cloud...</span>
-                </>
+                <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /><span>Syncing Queue to Cloud...</span></>
               ) : (
-                <>
-                  <UploadCloud className="w-5 h-5" />
-                  <span>
-                    Submit Queue ({validItemsCount} of {queueItems.length} items ready)
-                  </span>
-                </>
+                <><UploadCloud className="w-5 h-5" /><span>Submit Queue ({validItemsCount} of {queueItems.length} items ready)</span></>
               )}
             </button>
           </motion.div>
         )}
       </main>
 
-      {/* Advance Search Modal */}
       <AdvanceSearchModal
         isOpen={isAdvanceSearchOpen}
         onClose={() => setIsAdvanceSearchOpen(false)}
@@ -731,7 +837,6 @@ export default function ScanPage() {
         }}
       />
 
-      {/* Product Report Modal */}
       <ProductReportModal
         isOpen={isReportOpen}
         onClose={() => setIsReportOpen(false)}
@@ -739,7 +844,6 @@ export default function ScanPage() {
         initialProductName={reportProduct}
       />
 
-      {/* Smart Batch Model Add Modal */}
       <BatchModelAddModal
         isOpen={isBatchModalOpen}
         onClose={() => setIsBatchModalOpen(false)}
