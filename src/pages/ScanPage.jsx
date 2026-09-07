@@ -22,6 +22,7 @@ import { db, addToQueue, updateQueueQty } from '../lib/db'
 import { submitQueue } from '../lib/sync'
 import { advancedFilterMaterials } from '../lib/searchUtils'
 import { filterMaterialsByCanonicalModel, resolveModelAlias, resolveSupplierModelLabel, saveModelAlias, saveSupplierModelLabel } from '../lib/modelLabelResolver'
+import { generateSkuForModel } from '../lib/modelMatcher'
 import ScannerView from '../components/ScannerView'
 import QueueList from '../components/QueueList'
 import Nav from '../components/Nav'
@@ -50,6 +51,8 @@ export default function ScanPage() {
   const [unknownLabel, setUnknownLabel] = useState(null)
   const [unknownLabelModel, setUnknownLabelModel] = useState('')
   const [savingLabel, setSavingLabel] = useState(false)
+  const [materialCreator, setMaterialCreator] = useState(null)
+  const [creatingMaterial, setCreatingMaterial] = useState(false)
 
   // Materials state for live advanced search
   const [materials, setMaterials] = useState([])
@@ -141,8 +144,14 @@ export default function ScanPage() {
     const candidates = filterMaterialsByCanonicalModel(materials, canonicalModel)
 
     if (candidates.length === 0) {
-      setStatusType('warning')
-      setStatus(`Label "${rawLabel}" is linked to model "${canonicalModel}", but no material records exist for that model.`)
+      if (isOwnerRef.current && currentDirection === 'in') {
+        setMaterialCreator({ rawLabel, canonicalModel, direction: currentDirection, materialName: '' })
+        setStatusType('info')
+        setStatus(`Model "${canonicalModel}" is mapped. Create its first material now.`)
+      } else {
+        setStatusType('warning')
+        setStatus(`Label "${rawLabel}" is linked to model "${canonicalModel}", but no material records exist for that model. Ask the owner to create one during inward entry.`)
+      }
       return
     }
 
@@ -242,6 +251,46 @@ export default function ScanPage() {
     handleScan(m.sku)
     setManualSku('')
     setIsManualFocused(false)
+  }
+
+  async function handleCreateMappedMaterial(e) {
+    e.preventDefault()
+    const draft = materialCreator
+    const materialName = draft?.materialName?.trim()
+    if (!draft || !materialName || creatingMaterial) return
+
+    setCreatingMaterial(true)
+    const generatedSku = generateSkuForModel(draft.canonicalModel, materials, materialName)
+    const { data, error } = await supabase
+      .from('materials')
+      .insert({
+        sku: generatedSku,
+        name: materialName,
+        model: draft.canonicalModel,
+        unit: 'pcs',
+      })
+      .select('sku, name, model, unit, current_qty')
+      .single()
+
+    if (error || !data) {
+      setCreatingMaterial(false)
+      setStatusType('error')
+      setStatus(`Could not create material: ${error?.message || 'Unknown error'}`)
+      return
+    }
+
+    await db.materialsCache.put({
+      sku: data.sku,
+      name: data.name,
+      model: data.model || '',
+      currentQty: data.current_qty ?? 0,
+      updatedAt: new Date().toISOString(),
+    })
+
+    setMaterialCreator(null)
+    setCreatingMaterial(false)
+    await loadMaterials()
+    await queueMaterial(data, draft.direction, draft.rawLabel)
   }
 
   async function handleUnknownLabelSave(e) {
@@ -611,6 +660,80 @@ export default function ScanPage() {
                     )
                   })}
                 </div>
+
+                {isOwner && materialPicker.direction === 'in' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMaterialPicker(null)
+                      setMaterialCreator({
+                        rawLabel: materialPicker.rawLabel,
+                        canonicalModel: materialPicker.canonicalModel,
+                        direction: materialPicker.direction,
+                        materialName: '',
+                      })
+                    }}
+                    className="w-full mt-3 py-3 rounded-xl border border-dashed border-blue-300 bg-blue-50 text-blue-700 font-bold text-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Create New Material for {materialPicker.canonicalModel}
+                  </button>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Create the first material after a new supplier label/model is mapped. */}
+        <AnimatePresence>
+          {materialCreator && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.94, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.94, y: 16 }}
+                className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-200"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 mb-1">Model mapped</div>
+                    <h3 className="text-xl font-black text-slate-900">{materialCreator.canonicalModel}</h3>
+                    <p className="text-xs text-slate-500 mt-1">Supplier label <span className="font-mono font-bold text-slate-800">{materialCreator.rawLabel}</span> needs a material record.</p>
+                  </div>
+                  <button type="button" onClick={() => setMaterialCreator(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-xl"><X className="w-5 h-5" /></button>
+                </div>
+
+                <form onSubmit={handleCreateMappedMaterial} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Material name *</label>
+                    <input
+                      value={materialCreator.materialName}
+                      onChange={(e) => setMaterialCreator({ ...materialCreator, materialName: e.target.value })}
+                      placeholder="e.g. 2MM Silicon"
+                      autoFocus
+                      required
+                      className="w-full px-3.5 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1.5">The model stays <strong>{materialCreator.canonicalModel}</strong>. Only the material changes.</p>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-xl border border-slate-200 p-3">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Auto SKU</div>
+                    <div className="font-mono font-bold text-slate-700 text-sm mt-1">{generateSkuForModel(materialCreator.canonicalModel, materials, materialCreator.materialName || 'Material')}</div>
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button type="submit" disabled={!materialCreator.materialName.trim() || creatingMaterial} className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl disabled:opacity-50">
+                      {creatingMaterial ? 'Creating...' : 'Create & Add to Queue'}
+                    </button>
+                    <button type="button" onClick={() => setMaterialCreator(null)} className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm rounded-xl">Cancel</button>
+                  </div>
+                </form>
               </motion.div>
             </motion.div>
           )}

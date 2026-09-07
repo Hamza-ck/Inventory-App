@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, ScanText } from 'lucide-react'
 
 const OCR_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'
-const OCR_INTERVAL_MS = 2200
+const OCR_INTERVAL_MS = 1800
 const DUPLICATE_COOLDOWN_MS = 6000
 
 function normalizeText(value) {
@@ -50,11 +50,13 @@ function makeFingerprint(video) {
   return hash
 }
 
-function buildOcrImage(video) {
+function buildOcrImage(video, threshold = false) {
   const width = video.videoWidth || 1280
   const height = video.videoHeight || 720
-  const cropWidth = Math.floor(width * 0.70)
-  const cropHeight = Math.floor(height * 0.34)
+  // Match the visible scan window more closely while leaving enough vertical room
+  // for short labels that sit slightly above/below the center line.
+  const cropWidth = Math.floor(width * 0.82)
+  const cropHeight = Math.floor(height * 0.42)
   const sx = Math.floor((width - cropWidth) / 2)
   const sy = Math.floor((height - cropHeight) / 2)
   const scale = 3
@@ -71,7 +73,9 @@ function buildOcrImage(video) {
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height)
   for (let i = 0; i < image.data.length; i += 4) {
     const gray = Math.round(image.data[i] * 0.299 + image.data[i + 1] * 0.587 + image.data[i + 2] * 0.114)
-    const value = gray > 178 ? 255 : gray < 82 ? 0 : Math.max(0, Math.min(255, (gray - 120) * 2 + 120))
+    const value = threshold
+      ? (gray > 172 ? 255 : gray < 96 ? 0 : gray)
+      : gray
     image.data[i] = value
     image.data[i + 1] = value
     image.data[i + 2] = value
@@ -113,6 +117,8 @@ export default function ScannerView({ onScan }) {
   const onScanRef = useRef(onScan)
   const ocrBusyRef = useRef(false)
   const ocrPromiseRef = useRef(null)
+  const ocrWorkerRef = useRef(null)
+  const ocrConsensusRef = useRef({ text: null, count: 0 })
   const lastCodeRef = useRef({ text: null, at: 0 })
   const lastOcrFingerprintRef = useRef(null)
   const barcodeFrameRef = useRef(null)
@@ -141,6 +147,35 @@ export default function ScannerView({ onScan }) {
     return true
   }
 
+  async function getOcrWorker(tesseract) {
+    if (ocrWorkerRef.current) return ocrWorkerRef.current
+    const worker = await tesseract.createWorker('eng', 1, { logger: () => {} })
+    await worker.setParameters({
+      tessedit_pageseg_mode: '8',
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._',
+    })
+    ocrWorkerRef.current = worker
+    return worker
+  }
+
+  function acceptOcrCandidate(candidate, confidence, manual) {
+    if (!candidate) return false
+    const current = ocrConsensusRef.current
+    if (current.text === candidate) current.count += 1
+    else ocrConsensusRef.current = { text: candidate, count: 1 }
+
+    // Fast path for a strong read; otherwise require two consecutive reads to
+    // protect the inventory flow from one-frame OCR garbage.
+    const confirmed = manual || confidence >= 78 || ocrConsensusRef.current.count >= 2
+    if (!confirmed) {
+      setScannerHint(`Checking label: ${candidate}`)
+      return false
+    }
+
+    ocrConsensusRef.current = { text: null, count: 0 }
+    return emitDetected(candidate, 'ocr')
+  }
+
   async function runOcr({ manual = false } = {}) {
     if (ocrBusyRef.current || !videoRef.current || videoRef.current.readyState < 2) return false
 
@@ -156,26 +191,29 @@ export default function ScannerView({ onScan }) {
       const tesseract = await ocrPromiseRef.current
       if (!tesseract) throw new Error('OCR engine unavailable.')
 
-      const image = buildOcrImage(videoRef.current)
-      const result = await tesseract.recognize(image, 'eng', {
-        logger: () => {},
-        config: {
-          tessedit_pageseg_mode: '7',
-          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._',
-        },
-      })
+      const worker = await getOcrWorker(tesseract)
+      const primaryImage = buildOcrImage(videoRef.current, false)
+      let result = await worker.recognize(primaryImage)
+      let candidate = chooseCandidate(result?.data?.text)
+      let confidence = Number(result?.data?.confidence || 0)
 
-      const candidate = chooseCandidate(result?.data?.text)
-      const confidence = Number(result?.data?.confidence || 0)
+      // One fallback pass for low-confidence reads. The worker is reused, so
+      // this is much cheaper than creating a new Tesseract worker per frame.
+      if (!candidate || confidence < 52) {
+        const thresholdImage = buildOcrImage(videoRef.current, true)
+        result = await worker.recognize(thresholdImage)
+        candidate = chooseCandidate(result?.data?.text)
+        confidence = Number(result?.data?.confidence || 0)
+      }
+
       lastOcrFingerprintRef.current = makeFingerprint(videoRef.current) ?? fingerprint
 
-      if (!candidate || confidence < 58) {
+      if (!candidate || confidence < 42) {
         if (manual) setScannerHint('Could not read the label clearly — move closer and hold steady')
         return false
       }
 
-      emitDetected(candidate, 'ocr')
-      return true
+      return acceptOcrCandidate(candidate, confidence, manual)
     } catch (err) {
       console.error('OCR error:', err)
       if (manual) setScannerHint(err?.message || 'OCR failed. Try better lighting.')
@@ -252,6 +290,10 @@ export default function ScannerView({ onScan }) {
       if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
       trackRef.current = null
+      ocrConsensusRef.current = { text: null, count: 0 }
+      const worker = ocrWorkerRef.current
+      ocrWorkerRef.current = null
+      if (worker?.terminate) worker.terminate().catch(() => {})
     }
   }, [facingMode])
 
