@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, Loader2 } from 'lucide-react'
+import {
+  recognizeText,
+  getActiveEngineDetails,
+  terminateOcrWorker,
+  getUniversalWorker,
+  OCR_ENGINE_TYPES,
+  OCR_ENGINE_LABELS,
+} from '../lib/ocrEngine'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
-const OCR_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
-const FAST_LANG_PATH = 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast'
 const OCR_INTERVAL_MS = 1600       // ms between auto OCR reads
 const DUPLICATE_COOLDOWN_MS = 4000 // suppress re-emitting the same code
 
@@ -120,16 +126,6 @@ function chooseCandidate(rawText) {
   })
 
   return unique[0]
-}
-
-function withTimeout(promise, ms, message) {
-  let timer = null
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message || `Timeout after ${ms}ms`)), ms)
-  })
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer)
-  })
 }
 
 // ─── Image Processing & Label Sticker Isolation ──────────────────────────────
@@ -250,7 +246,6 @@ function enhanceContrast(canvas) {
 /**
  * Estimate image sharpness via gradient variance (cheap Laplacian-style proxy).
  * Motion blur flattens edges, so a low score means the frame is too blurry to trust.
- * Works on the already-grayscale (enhanceContrast) canvas, sampling every 2nd pixel for speed.
  */
 function estimateSharpness(canvas) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
@@ -287,7 +282,7 @@ function estimateSharpness(canvas) {
 
 /**
  * Capture video frame snapshot, isolate label, enhance contrast, and export Data URL.
- * 100% in-memory processing on device, zero cloud.
+ * 100% on-device processing.
  */
 function buildOcrImage(video) {
   const width = video.videoWidth || 1280
@@ -299,7 +294,7 @@ function buildOcrImage(video) {
   const sx = Math.floor((width - cropWidth) / 2)
   const sy = Math.floor((height - cropHeight) / 2)
 
-  // Clamp target resolution for fast LSTM recognition
+  // Clamp target resolution for fast on-device recognition
   const targetWidth = Math.min(560, cropWidth)
   const scale = targetWidth / cropWidth
   const targetHeight = Math.round(cropHeight * scale)
@@ -320,53 +315,14 @@ function buildOcrImage(video) {
   // Step 2: Apply high-contrast black/white enhancement
   const finalCanvas = enhanceContrast(isolatedCanvas)
 
-  // Return base64 JPEG Data URL for safe worker ingestion, plus the canvas for sharpness checks
   return {
+    canvas: finalCanvas,
     dataUrl: finalCanvas.toDataURL('image/jpeg', 0.88),
     sharpness: estimateSharpness(finalCanvas),
   }
 }
 
-const MIN_SHARPNESS = 12 // frames below this are treated as motion-blurred; tune against real devices
-
-// ─── Tesseract Loader ─────────────────────────────────────────────────────────
-
-let tesseractLoadPromise = null
-
-async function loadTesseract() {
-  if (typeof window === 'undefined') return null
-  if (window.Tesseract) return window.Tesseract
-  if (tesseractLoadPromise) return tesseractLoadPromise
-
-  tesseractLoadPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-inventory-tesseract]')
-    if (existing) {
-      if (window.Tesseract) {
-        resolve(window.Tesseract)
-        return
-      }
-      existing.addEventListener('load', () => resolve(window.Tesseract), { once: true })
-      existing.addEventListener('error', () => reject(new Error('OCR script failed to load')), { once: true })
-      return
-    }
-
-    const script = document.createElement('script')
-    script.src = OCR_SCRIPT_URL
-    script.async = true
-    script.dataset.inventoryTesseract = 'true'
-    script.onload = () => {
-      if (window.Tesseract) {
-        resolve(window.Tesseract)
-      } else {
-        reject(new Error('Tesseract loaded but not available on window'))
-      }
-    }
-    script.onerror = () => reject(new Error('Failed to load OCR engine from CDN'))
-    document.head.appendChild(script)
-  })
-
-  return tesseractLoadPromise
-}
+const MIN_SHARPNESS = 12 // frames below this are treated as motion-blurred
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -377,8 +333,6 @@ export default function ScannerView({ onScan }) {
   const barcodeDetectorRef = useRef(null)
   const onScanRef = useRef(onScan)
   const ocrBusyRef = useRef(false)
-  const ocrWorkerRef = useRef(null)
-  const workerInitPromiseRef = useRef(null)
   const ocrConsensusRef = useRef({ text: null, count: 0 })
   const lastCodeRef = useRef({ text: null, at: 0 })
   const barcodeFrameRef = useRef(null)
@@ -392,10 +346,11 @@ export default function ScannerView({ onScan }) {
   const [facingMode, setFacingMode] = useState('environment')
   const [isInitializing, setIsInitializing] = useState(true)
   const [isOcrRunning, setIsOcrRunning] = useState(false)
-  const [, setOcrReady] = useState(false)
   const [scannerHint, setScannerHint] = useState('Starting camera…')
   const [lastRead, setLastRead] = useState('')
   const [shutterFlash, setShutterFlash] = useState(false)
+
+  const engineDetails = useMemo(() => getActiveEngineDetails(), [])
 
   useEffect(() => { onScanRef.current = onScan }, [onScan])
   useEffect(() => {
@@ -419,63 +374,12 @@ export default function ScannerView({ onScan }) {
     return true
   }, [])
 
-  // ── Create / reuse the Tesseract worker ─────────────────────────────────
-  async function getOcrWorker(tesseract) {
-    if (ocrWorkerRef.current) return ocrWorkerRef.current
-    if (workerInitPromiseRef.current) return workerInitPromiseRef.current
-
-    workerInitPromiseRef.current = (async () => {
-      try {
-        if (mountedRef.current) setScannerHint('Loading OCR engine…')
-
-        const createPromise = tesseract.createWorker('eng', 1, {
-          langPath: FAST_LANG_PATH,
-          gzip: true,
-          logger: (m) => {
-            if (!mountedRef.current) return
-            if (m?.status) {
-              const pct = typeof m.progress === 'number' ? Math.round(m.progress * 100) : null
-              if (m.status.includes('loading') || m.status.includes('downloading')) {
-                setScannerHint(pct !== null ? `Loading OCR (${pct}%)…` : 'Loading OCR model…')
-              } else if (m.status.includes('init')) {
-                setScannerHint('Initializing OCR…')
-              }
-            }
-          },
-        })
-
-        const worker = await withTimeout(createPromise, 15000, 'OCR engine setup timed out')
-
-        await worker.setParameters({
-          tessedit_pageseg_mode: '6', // Assume a single uniform block of text
-          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -/',
-        })
-
-        ocrWorkerRef.current = worker
-        if (mountedRef.current) {
-          setOcrReady(true)
-          setScannerHint('Align white label in box')
-        }
-        return worker
-      } catch (err) {
-        console.error('[OCR] Worker creation failed:', err)
-        workerInitPromiseRef.current = null
-        throw err
-      }
-    })()
-
-    return workerInitPromiseRef.current
-  }
-
   // ── Consensus logic ────────────────────────────────────────────────────
   function acceptOcrCandidate(candidate, confidence, manual) {
     if (!candidate || isGarbageToken(candidate)) return false
 
     // Manual snapshot (deliberate user tap): accept immediately.
-    // Auto scan: NEVER trust a single read, even a high-confidence one — a
-    // blurry frame can still score confidently on the wrong text (e.g. "G64"
-    // misread as "EA7"). Always require the same candidate on two consecutive
-    // passes before it's queued.
+    // Auto scan: require the same candidate on two consecutive passes before queueing.
     const confirmed = manual || ocrConsensusRef.current.text === candidate
 
     if (!confirmed) {
@@ -488,7 +392,7 @@ export default function ScannerView({ onScan }) {
     return emitDetected(candidate, 'ocr')
   }
 
-  // ── Run one OCR pass (Snap / Auto) ──────────────────────────────────────
+  // ── Run one OCR pass (Snap / Auto) via Unified Engine ───────────────────
   async function runOcr({ manual = false } = {}) {
     if (ocrBusyRef.current) return false
     if (!videoRef.current || videoRef.current.readyState < 2) return false
@@ -504,38 +408,41 @@ export default function ScannerView({ onScan }) {
     }
 
     try {
-      const tesseract = await withTimeout(loadTesseract(), 8000, 'OCR engine load timed out')
-      if (!tesseract) throw new Error('OCR engine not available')
-
-      const worker = await getOcrWorker(tesseract)
-      if (!worker) throw new Error('OCR worker unavailable')
-
       // Capture frame snapshot and isolate sticker
-      const { dataUrl, sharpness } = buildOcrImage(videoRef.current)
+      const { canvas, dataUrl, sharpness } = buildOcrImage(videoRef.current)
 
       // Motion-blur guard: a smeared frame produces confident-but-wrong reads
-      // (e.g. "G64" -> "EA7"). Skip auto passes on blurry frames entirely;
-      // still allow a manual snap through (user chose the moment) but flag it.
       const isBlurry = sharpness < MIN_SHARPNESS
       if (isBlurry && !manual) {
-        ocrConsensusRef.current = { text: null, count: 0 } // don't let a blurry frame half-confirm a candidate
+        ocrConsensusRef.current = { text: null, count: 0 }
         if (mountedRef.current) setScannerHint('Hold camera steady on label…')
         return false
       }
 
-      const recognizePromise = worker.recognize(dataUrl)
-      const result = await withTimeout(recognizePromise, 5000, 'OCR recognition timed out')
+      // Execute on-device OCR through the unified engine (Apple Vision -> Google ML Kit -> TextDetector -> WASM)
+      const result = await recognizeText({
+        canvas,
+        dataUrl,
+        onProgress: (p) => {
+          if (!mountedRef.current) return
+          if (p?.percent !== null) {
+            setScannerHint(`Initializing OCR (${p.percent}%)…`)
+          }
+        },
+      })
 
-      const rawText = result?.data?.text || ''
-      const confidence = Number(result?.data?.confidence || 0)
+      const rawText = result?.text || ''
+      const confidence = Number(result?.confidence || 0)
+      const latencyMs = result?.latencyMs || 0
+      const engineName = result?.engine ? (OCR_ENGINE_LABELS[result.engine]?.name || result.engine) : ''
       const candidate = chooseCandidate(rawText)
 
       if (mountedRef.current) {
-        const blurNote = manual && isBlurry ? ' — image looked blurry, double-check' : ''
+        const blurNote = manual && isBlurry ? ' — blurry frame' : ''
         setLastRead(
           candidate
-            ? `Read: "${candidate}" (${Math.round(confidence)}%)${blurNote}`
-            : (rawText.trim() && !isGarbageToken(compactText(rawText)) ? `Seen: "${rawText.trim().slice(0, 15)}"` : '')
+            ? `Read: "${candidate}" (${latencyMs}ms • ${engineName})${blurNote}`
+            : (rawText.trim() && !isGarbageToken(compactText(rawText)) ? `Seen: "${rawText.trim().slice(0, 15)}" (${latencyMs}ms)` : '')
         )
       }
 
@@ -609,16 +516,12 @@ export default function ScannerView({ onScan }) {
           }
         } catch {}
 
-        // Pre-load Tesseract in background
-        loadTesseract()
-          .then((tess) => {
-            if (active && tess) {
-              getOcrWorker(tess).catch(() => {})
-            }
+        // Warm up universal WASM engine in background if it's the active engine
+        if (engineDetails.type === OCR_ENGINE_TYPES.UNIVERSAL_WASM) {
+          getUniversalWorker().catch((err) => {
+            console.warn('[OCR Engine] Warmup note:', err.message)
           })
-          .catch((err) => {
-            console.warn('[OCR] Pre-load failed:', err.message)
-          })
+        }
 
         // Set up native barcode detector if available
         if ('BarcodeDetector' in window) {
@@ -659,12 +562,9 @@ export default function ScannerView({ onScan }) {
       streamRef.current = null
       trackRef.current = null
       ocrConsensusRef.current = { text: null, count: 0 }
-      const worker = ocrWorkerRef.current
-      ocrWorkerRef.current = null
-      workerInitPromiseRef.current = null
-      if (worker?.terminate) worker.terminate().catch(() => {})
+      terminateOcrWorker().catch(() => {})
     }
-  }, [facingMode])
+  }, [facingMode, engineDetails.type])
 
   // ── Barcode detection loop (native browser API) ─────────────────────────
   useEffect(() => {
@@ -782,11 +682,20 @@ export default function ScannerView({ onScan }) {
         </div>
       </div>
 
-      {/* Top controls */}
-      <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10 pointer-events-auto">
-        <div className="bg-slate-900/75 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 text-white text-[11px] font-medium flex items-center gap-1.5 shadow-md">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${isOcrRunning ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-          <span className="truncate max-w-[170px]">{lastRead || scannerHint}</span>
+      {/* Top controls & OCR Engine Badge */}
+      <div className="absolute top-3 left-3 right-3 flex items-start justify-between z-10 pointer-events-auto">
+        <div className="flex flex-col gap-1.5 items-start max-w-[70%]">
+          <div className="bg-slate-900/75 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 text-white text-[11px] font-medium flex items-center gap-1.5 shadow-md">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${isOcrRunning ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+            <span className="truncate">{lastRead || scannerHint}</span>
+          </div>
+
+          {/* Active On-Device Engine Badge */}
+          <div className="bg-slate-900/80 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10 text-[10px] text-slate-300 flex items-center gap-1.5 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" />
+            <span className="font-semibold text-white">{engineDetails.badge}</span>
+            <span className="text-slate-400 text-[9px] font-mono hidden sm:inline">({engineDetails.framework})</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
