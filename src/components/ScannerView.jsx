@@ -41,6 +41,10 @@ function isGarbageToken(token) {
   const hasDigit = /[0-9]/.test(token)
   if (!hasLetter || !hasDigit) return true
 
+  // Reject packaging quantity/unit descriptors, not model codes
+  // e.g. "50PCS", "2MM", "10SET", "1PC", "3PACK", "5KG"
+  if (/^[0-9]{1,4}(PCS?|MM|CM|KG|SET|PACK|LOT|QTY)$/i.test(token)) return true
+
   // For 2-char tokens, reject if starts with ambiguous glare letters
   if (token.length === 2 && /^[IOLZ10]/i.test(token)) return true
 
@@ -244,6 +248,44 @@ function enhanceContrast(canvas) {
 }
 
 /**
+ * Estimate image sharpness via gradient variance (cheap Laplacian-style proxy).
+ * Motion blur flattens edges, so a low score means the frame is too blurry to trust.
+ * Works on the already-grayscale (enhanceContrast) canvas, sampling every 2nd pixel for speed.
+ */
+function estimateSharpness(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return 0
+
+  const { width, height } = canvas
+  if (width < 3 || height < 3) return 0
+
+  const imgData = ctx.getImageData(0, 0, width, height)
+  const d = imgData.data
+
+  let sum = 0
+  let sumSq = 0
+  let count = 0
+  const step = 2
+
+  for (let y = 1; y < height - 1; y += step) {
+    for (let x = 1; x < width - 1; x += step) {
+      const idx = (y * width + x) * 4
+      const idxRight = (y * width + (x + 1)) * 4
+      const idxDown = ((y + 1) * width + x) * 4
+
+      const grad = Math.abs(d[idx] - d[idxRight]) + Math.abs(d[idx] - d[idxDown])
+      sum += grad
+      sumSq += grad * grad
+      count++
+    }
+  }
+
+  if (count === 0) return 0
+  const mean = sum / count
+  return Math.max(0, sumSq / count - mean * mean)
+}
+
+/**
  * Capture video frame snapshot, isolate label, enhance contrast, and export Data URL.
  * 100% in-memory processing on device, zero cloud.
  */
@@ -278,9 +320,14 @@ function buildOcrImage(video) {
   // Step 2: Apply high-contrast black/white enhancement
   const finalCanvas = enhanceContrast(isolatedCanvas)
 
-  // Return base64 JPEG Data URL for safe worker ingestion
-  return finalCanvas.toDataURL('image/jpeg', 0.88)
+  // Return base64 JPEG Data URL for safe worker ingestion, plus the canvas for sharpness checks
+  return {
+    dataUrl: finalCanvas.toDataURL('image/jpeg', 0.88),
+    sharpness: estimateSharpness(finalCanvas),
+  }
 }
+
+const MIN_SHARPNESS = 12 // frames below this are treated as motion-blurred; tune against real devices
 
 // ─── Tesseract Loader ─────────────────────────────────────────────────────────
 
@@ -424,9 +471,12 @@ export default function ScannerView({ onScan }) {
   function acceptOcrCandidate(candidate, confidence, manual) {
     if (!candidate || isGarbageToken(candidate)) return false
 
-    // Manual snapshot: accept immediately if confidence is reasonable
-    // Auto scan: require confidence >= 35 or 2nd matching read
-    const confirmed = manual || confidence >= 35 || ocrConsensusRef.current.text === candidate
+    // Manual snapshot (deliberate user tap): accept immediately.
+    // Auto scan: NEVER trust a single read, even a high-confidence one — a
+    // blurry frame can still score confidently on the wrong text (e.g. "G64"
+    // misread as "EA7"). Always require the same candidate on two consecutive
+    // passes before it's queued.
+    const confirmed = manual || ocrConsensusRef.current.text === candidate
 
     if (!confirmed) {
       ocrConsensusRef.current = { text: candidate, count: 1 }
@@ -461,7 +511,18 @@ export default function ScannerView({ onScan }) {
       if (!worker) throw new Error('OCR worker unavailable')
 
       // Capture frame snapshot and isolate sticker
-      const dataUrl = buildOcrImage(videoRef.current)
+      const { dataUrl, sharpness } = buildOcrImage(videoRef.current)
+
+      // Motion-blur guard: a smeared frame produces confident-but-wrong reads
+      // (e.g. "G64" -> "EA7"). Skip auto passes on blurry frames entirely;
+      // still allow a manual snap through (user chose the moment) but flag it.
+      const isBlurry = sharpness < MIN_SHARPNESS
+      if (isBlurry && !manual) {
+        ocrConsensusRef.current = { text: null, count: 0 } // don't let a blurry frame half-confirm a candidate
+        if (mountedRef.current) setScannerHint('Hold camera steady on label…')
+        return false
+      }
+
       const recognizePromise = worker.recognize(dataUrl)
       const result = await withTimeout(recognizePromise, 5000, 'OCR recognition timed out')
 
@@ -470,9 +531,10 @@ export default function ScannerView({ onScan }) {
       const candidate = chooseCandidate(rawText)
 
       if (mountedRef.current) {
+        const blurNote = manual && isBlurry ? ' — image looked blurry, double-check' : ''
         setLastRead(
           candidate
-            ? `Read: "${candidate}" (${Math.round(confidence)}%)`
+            ? `Read: "${candidate}" (${Math.round(confidence)}%)${blurNote}`
             : (rawText.trim() && !isGarbageToken(compactText(rawText)) ? `Seen: "${rawText.trim().slice(0, 15)}"` : '')
         )
       }
