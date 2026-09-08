@@ -177,9 +177,11 @@ export default function ScannerView({ onScan }) {
   // Idefics3 configuration modal state
   const [isConfigOpen, setIsConfigOpen] = useState(false)
   const [configDraft, setConfigDraft] = useState({ token: '', endpoint: '' })
-  const [hasHfToken, setHasHfToken] = useState(() => getIdeficsConfig().hasToken)
-
-  const ideficsConfig = useMemo(() => getIdeficsConfig(), [hasHfToken])
+  const [configVersion, setConfigVersion] = useState(0)
+  const ideficsConfig = useMemo(() => {
+    void configVersion
+    return getIdeficsConfig()
+  }, [configVersion])
 
   useEffect(() => { onScanRef.current = onScan }, [onScan])
   useEffect(() => {
@@ -440,7 +442,7 @@ export default function ScannerView({ onScan }) {
   function handleSaveConfig(e) {
     e.preventDefault()
     saveIdeficsConfig(configDraft)
-    setHasHfToken(Boolean(configDraft.token))
+    setConfigVersion((v) => v + 1)
     setIsConfigOpen(false)
     setScannerHint('Idefics3 token configured')
   }
