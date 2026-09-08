@@ -21,7 +21,7 @@ import { supabase } from '../lib/supabaseClient'
 import { db, addToQueue, updateQueueQty } from '../lib/db'
 import { submitQueue } from '../lib/sync'
 import { advancedFilterMaterials } from '../lib/searchUtils'
-import { filterMaterialsByCanonicalModel, resolveModelAlias, resolveSupplierModelLabel, saveModelAlias, saveSupplierModelLabel } from '../lib/modelLabelResolver'
+import { filterMaterialsByCanonicalModel, resolveModelAlias, resolveSupplierModelLabel, saveModelAlias, saveSupplierModelLabel, updateSupplierModelLabelMaterial } from '../lib/modelLabelResolver'
 import { generateSkuForModel } from '../lib/modelMatcher'
 import ScannerView from '../components/ScannerView'
 import QueueList from '../components/QueueList'
@@ -53,6 +53,7 @@ export default function ScanPage() {
   const [savingLabel, setSavingLabel] = useState(false)
   const [materialCreator, setMaterialCreator] = useState(null)
   const [creatingMaterial, setCreatingMaterial] = useState(false)
+  const [linkLabelToMaterial, setLinkLabelToMaterial] = useState(true) // "Remember for this label" toggle
 
   // Materials state for live advanced search
   const [materials, setMaterials] = useState([])
@@ -140,7 +141,17 @@ export default function ScanPage() {
     })
   }
 
-  async function resolveModelToMaterials(rawLabel, canonicalModel, currentDirection) {
+  async function resolveModelToMaterials(rawLabel, canonicalModel, currentDirection, directMaterialSku = null) {
+    // Fast path: if the label has a direct material_id, find and queue it immediately
+    if (directMaterialSku) {
+      const directMatch = materials.find((m) => m.sku === directMaterialSku)
+      if (directMatch) {
+        await queueMaterial(directMatch, currentDirection, rawLabel)
+        return
+      }
+      // material_id was set but material not found in local list — fall through to picker
+    }
+
     const candidates = filterMaterialsByCanonicalModel(materials, canonicalModel)
 
     if (candidates.length === 0) {
@@ -156,10 +167,15 @@ export default function ScanPage() {
     }
 
     if (candidates.length === 1) {
+      // Only one material exists — auto-link it to the label so future scans skip the picker
+      if (rawLabel) {
+        updateSupplierModelLabelMaterial(supabase, rawLabel, candidates[0].id).catch(() => {})
+      }
       await queueMaterial(candidates[0], currentDirection, rawLabel)
       return
     }
 
+    setLinkLabelToMaterial(true) // Default the toggle on for each new picker
     setMaterialPicker({
       rawLabel,
       canonicalModel,
@@ -207,10 +223,10 @@ export default function ScanPage() {
       return
     }
 
-    // Then resolve a supplier label -> canonical model.
+    // Then resolve a supplier label -> canonical model (and optionally a direct material).
     const labelMatch = await resolveSupplierModelLabel(supabase, sku)
     if (labelMatch?.canonicalModel) {
-      await resolveModelToMaterials(sku, labelMatch.canonicalModel, currentDirection)
+      await resolveModelToMaterials(sku, labelMatch.canonicalModel, currentDirection, labelMatch.materialSku)
       return
     }
 
@@ -269,7 +285,7 @@ export default function ScanPage() {
         model: draft.canonicalModel,
         unit: 'pcs',
       })
-      .select('sku, name, model, unit, current_qty')
+      .select('id, sku, name, model, unit, current_qty')
       .single()
 
     if (error || !data) {
@@ -286,6 +302,11 @@ export default function ScanPage() {
       currentQty: data.current_qty ?? 0,
       updatedAt: new Date().toISOString(),
     })
+
+    // Auto-link the supplier label to this newly created material
+    if (draft.rawLabel && data.id) {
+      await updateSupplierModelLabelMaterial(supabase, draft.rawLabel, data.id).catch(() => {})
+    }
 
     setMaterialCreator(null)
     setCreatingMaterial(false)
@@ -641,8 +662,13 @@ export default function ScanPage() {
                         key={m.id}
                         type="button"
                         onClick={async () => {
+                          const picker = materialPicker
                           setMaterialPicker(null)
-                          await queueMaterial(m, materialPicker.direction, materialPicker.rawLabel)
+                          // Permanently link this label to the chosen material
+                          if (linkLabelToMaterial && picker.rawLabel) {
+                            updateSupplierModelLabelMaterial(supabase, picker.rawLabel, m.id).catch(() => {})
+                          }
+                          await queueMaterial(m, picker.direction, picker.rawLabel)
                         }}
                         className="w-full p-3.5 rounded-2xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-left transition-colors"
                       >
@@ -660,6 +686,22 @@ export default function ScanPage() {
                     )
                   })}
                 </div>
+
+                {/* Remember for this label toggle */}
+                {materialPicker.rawLabel && (
+                  <label className="flex items-center gap-2.5 mt-3 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={linkLabelToMaterial}
+                      onChange={(e) => setLinkLabelToMaterial(e.target.checked)}
+                      className="w-4 h-4 rounded accent-amber-600"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-amber-900">Remember for this label</div>
+                      <div className="text-[10px] text-amber-700">Next time <span className="font-mono font-bold">{materialPicker.rawLabel}</span> is scanned, it will auto-select this material</div>
+                    </div>
+                  </label>
+                )}
 
                 {isOwner && materialPicker.direction === 'in' && (
                   <button
