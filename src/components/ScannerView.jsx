@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, ScanText, Loader2 } from 'lucide-react'
+import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, Loader2 } from 'lucide-react'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 const OCR_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
@@ -8,7 +8,7 @@ const FAST_LANG_PATH = 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0
 const OCR_INTERVAL_MS = 1600       // ms between auto OCR reads
 const DUPLICATE_COOLDOWN_MS = 4000 // suppress re-emitting the same code
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Text & Garbage Filtering ─────────────────────────────────────────────────
 
 function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim()
@@ -19,18 +19,45 @@ function compactText(value) {
 }
 
 /**
- * Check if a token looks like a model label (e.g. V22, F31, A6PRO, G64).
- * Must contain at least one letter and one digit, length 2-14.
+ * Strict check to reject OCR garbage (wood grain, plastic reflections, shadow lines).
  */
-function isUsefulToken(value) {
-  const text = compactText(value)
-  if (text.length < 2 || text.length > 14) return false
-  return /[A-Z]/.test(text) && /[0-9]/.test(text)
+function isGarbageToken(token) {
+  if (!token || token.length < 2 || token.length > 12) return true
+
+  // Only 1s, Is, Ls, pipes (e.g. "II", "1I1", "|||") from packaging seams
+  if (/^[I1lL|]+$/i.test(token)) return true
+
+  // Only 0s and Os (e.g. "OO", "0O0")
+  if (/^[O0]+$/i.test(token)) return true
+
+  // Ambiguous 2-char pairs caused by reflection glare
+  if (token.length === 2 && /^(I1|1I|O0|0O|S5|5S|Z2|2Z|B8|8B)$/i.test(token)) return true
+
+  // Repetitive character strings e.g. "AAAA", "1111", "XXXX"
+  if (/^(.)\1+$/.test(token)) return true
+
+  // Must contain at least one Latin letter (A-Z) AND at least one digit (0-9)
+  const hasLetter = /[A-Z]/.test(token)
+  const hasDigit = /[0-9]/.test(token)
+  if (!hasLetter || !hasDigit) return true
+
+  // For 2-char tokens, reject if starts with ambiguous glare letters
+  if (token.length === 2 && /^[IOLZ10]/i.test(token)) return true
+
+  return false
 }
 
 /**
- * Extract the best model-like candidate from raw OCR text.
- * Robust to whitespace inserted by plastic glare (e.g. "G 64" -> "G64").
+ * Check if a token looks like a valid model code (e.g. G64, V22, F31, A6PRO).
+ */
+function isUsefulToken(value) {
+  const text = compactText(value)
+  return !isGarbageToken(text)
+}
+
+/**
+ * Extract the best model candidate from raw OCR text.
+ * Prioritizes clean patterns like G64, V22, F31 and discards glare noise.
  */
 function chooseCandidate(rawText) {
   if (!rawText) return null
@@ -47,7 +74,7 @@ function chooseCandidate(rawText) {
     }
   }
 
-  // 2. Direct regex search for common model pattern (e.g. G64, V22, F31, A6PRO, S23)
+  // 2. Direct regex search for model pattern (1-3 letters + 1-4 digits + optional suffix)
   const modelRegex = /\b([A-Z]{1,3}\s*[-]?\s*[0-9]{1,4}[A-Z]{0,3})\b/g
   let match
   while ((match = modelRegex.exec(source)) !== null) {
@@ -57,7 +84,7 @@ function chooseCandidate(rawText) {
     }
   }
 
-  // 3. Split into tokens by common separators
+  // 3. Split into words by common punctuation
   const words = source
     .split(/[\s,;|/:_\\()[\]{}<>-]+/)
     .map(compactText)
@@ -91,9 +118,6 @@ function chooseCandidate(rawText) {
   return unique[0]
 }
 
-/**
- * Timeout wrapper for promises to prevent infinite stalls on network or worker hangs.
- */
 function withTimeout(promise, ms, message) {
   let timer = null
   const timeout = new Promise((_, reject) => {
@@ -104,40 +128,84 @@ function withTimeout(promise, ms, message) {
   })
 }
 
+// ─── Image Processing & Label Sticker Isolation ──────────────────────────────
+
 /**
- * Crop and preprocess the center scan window area for fast, accurate OCR.
- * - Targets the exact reticle region
- * - Clamps max width to 560px for sub-200ms processing
- * - Returns a standard JPEG Data URL for reliable Web Worker ingestion
+ * Detect the white rectangular sticker patch inside the scanned reticle area.
+ * This cuts away the table wood grain, black phone case, and crimped plastic edges.
  */
-function buildOcrImage(video) {
-  const width = video.videoWidth || 1280
-  const height = video.videoHeight || 720
-
-  // Center crop matching the scan reticle with padding
-  const cropWidth = Math.floor(width * 0.55)
-  const cropHeight = Math.floor(height * 0.45)
-  const sx = Math.floor((width - cropWidth) / 2)
-  const sy = Math.floor((height - cropHeight) / 2)
-
-  // Clamp target resolution for fast LSTM recognition
-  const targetWidth = Math.min(560, cropWidth)
-  const scale = targetWidth / cropWidth
-  const targetHeight = Math.round(cropHeight * scale)
-
-  const canvas = document.createElement('canvas')
-  canvas.width = targetWidth
-  canvas.height = targetHeight
+function isolateLabelSticker(canvas) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) throw new Error('Canvas context unavailable')
+  if (!ctx) return canvas
 
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight)
+  const width = canvas.width
+  const height = canvas.height
+  const imgData = ctx.getImageData(0, 0, width, height)
+  const d = imgData.data
 
-  // Grayscale & contrast stretch
-  const image = ctx.getImageData(0, 0, targetWidth, targetHeight)
-  const d = image.data
+  let minX = width
+  let maxX = 0
+  let minY = height
+  let maxY = 0
+  let whiteCount = 0
+
+  // 3px sample grid for sub-millisecond execution
+  const step = 3
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const idx = (y * width + x) * 4
+      const r = d[idx]
+      const g = d[idx + 1]
+      const b = d[idx + 2]
+
+      const lum = r * 0.299 + g * 0.587 + b * 0.114
+      const sat = Math.max(r, g, b) - Math.min(r, g, b)
+
+      // White label sticker is bright (lum > 165) and neutral (sat < 40)
+      if (lum > 165 && sat < 40) {
+        whiteCount++
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+    }
+  }
+
+  const boxW = maxX - minX
+  const boxH = maxY - minY
+
+  // Check if a plausible sticker was found inside the center reticle
+  if (whiteCount > 50 && boxW > 45 && boxH > 22 && boxW < width * 0.92 && boxH < height * 0.92) {
+    const padX = 14
+    const padY = 10
+    const cropX = Math.max(0, minX - padX)
+    const cropY = Math.max(0, minY - padY)
+    const cropW = Math.min(width - cropX, boxW + padX * 2)
+    const cropH = Math.min(height - cropY, boxH + padY * 2)
+
+    const labelCanvas = document.createElement('canvas')
+    labelCanvas.width = cropW
+    labelCanvas.height = cropH
+    const labelCtx = labelCanvas.getContext('2d', { willReadFrequently: true })
+    if (labelCtx) {
+      labelCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+      return labelCanvas
+    }
+  }
+
+  return canvas
+}
+
+/**
+ * Deepen black text and maximize contrast against white sticker paper.
+ */
+function enhanceContrast(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return canvas
+
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const d = imgData.data
 
   let minLum = 255
   let maxLum = 0
@@ -158,11 +226,11 @@ function buildOcrImage(video) {
     if (canStretch) {
       val = Math.round(((val - minLum) / range) * 255)
     }
-    // Deepen dark text and brighten paper background
-    if (val < 95) {
-      val = Math.max(0, Math.round(val * 0.5))
-    } else if (val > 150) {
-      val = Math.min(255, Math.round(val * 1.15))
+    // Push black text to 0 and white paper to 255
+    if (val < 100) {
+      val = Math.max(0, Math.round(val * 0.45))
+    } else if (val > 140) {
+      val = Math.min(255, Math.round(val * 1.2))
     }
 
     d[i] = val
@@ -171,9 +239,47 @@ function buildOcrImage(video) {
     d[i + 3] = 255
   }
 
-  ctx.putImageData(image, 0, 0)
-  // Convert to Data URL: fixes worker postMessage serialization issues with raw canvas
-  return canvas.toDataURL('image/jpeg', 0.85)
+  ctx.putImageData(imgData, 0, 0)
+  return canvas
+}
+
+/**
+ * Capture video frame snapshot, isolate label, enhance contrast, and export Data URL.
+ * 100% in-memory processing on device, zero cloud.
+ */
+function buildOcrImage(video) {
+  const width = video.videoWidth || 1280
+  const height = video.videoHeight || 720
+
+  // Center crop matching the scan reticle with padding
+  const cropWidth = Math.floor(width * 0.55)
+  const cropHeight = Math.floor(height * 0.45)
+  const sx = Math.floor((width - cropWidth) / 2)
+  const sy = Math.floor((height - cropHeight) / 2)
+
+  // Clamp target resolution for fast LSTM recognition
+  const targetWidth = Math.min(560, cropWidth)
+  const scale = targetWidth / cropWidth
+  const targetHeight = Math.round(cropHeight * scale)
+
+  const initialCanvas = document.createElement('canvas')
+  initialCanvas.width = targetWidth
+  initialCanvas.height = targetHeight
+  const initialCtx = initialCanvas.getContext('2d', { willReadFrequently: true })
+  if (!initialCtx) throw new Error('Canvas context unavailable')
+
+  initialCtx.imageSmoothingEnabled = true
+  initialCtx.imageSmoothingQuality = 'high'
+  initialCtx.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight)
+
+  // Step 1: Isolate the white sticker from wood/phone case background
+  const isolatedCanvas = isolateLabelSticker(initialCanvas)
+
+  // Step 2: Apply high-contrast black/white enhancement
+  const finalCanvas = enhanceContrast(isolatedCanvas)
+
+  // Return base64 JPEG Data URL for safe worker ingestion
+  return finalCanvas.toDataURL('image/jpeg', 0.88)
 }
 
 // ─── Tesseract Loader ─────────────────────────────────────────────────────────
@@ -242,6 +348,7 @@ export default function ScannerView({ onScan }) {
   const [, setOcrReady] = useState(false)
   const [scannerHint, setScannerHint] = useState('Starting camera…')
   const [lastRead, setLastRead] = useState('')
+  const [shutterFlash, setShutterFlash] = useState(false)
 
   useEffect(() => { onScanRef.current = onScan }, [onScan])
   useEffect(() => {
@@ -252,14 +359,15 @@ export default function ScannerView({ onScan }) {
   // ── Emit a detected code ────────────────────────────────────────────────
   const emitDetected = useCallback((value, source) => {
     const text = compactText(value)
-    if (!text) return false
+    if (!text || isGarbageToken(text)) return false
+
     const now = Date.now()
     if (lastCodeRef.current.text === text && now - lastCodeRef.current.at < DUPLICATE_COOLDOWN_MS) return false
 
     lastCodeRef.current = { text, at: now }
     setScannerHint(source === 'ocr' ? `✓ Read label: ${text}` : `✓ Scanned code: ${text}`)
     setLastRead(`Detected: ${text}`)
-    try { if (navigator.vibrate) navigator.vibrate(45) } catch {}
+    try { if (navigator.vibrate) navigator.vibrate(50) } catch {}
     onScanRef.current?.(text)
     return true
   }, [])
@@ -281,7 +389,7 @@ export default function ScannerView({ onScan }) {
             if (m?.status) {
               const pct = typeof m.progress === 'number' ? Math.round(m.progress * 100) : null
               if (m.status.includes('loading') || m.status.includes('downloading')) {
-                setScannerHint(pct !== null ? `Loading OCR model (${pct}%)…` : 'Loading OCR model…')
+                setScannerHint(pct !== null ? `Loading OCR (${pct}%)…` : 'Loading OCR model…')
               } else if (m.status.includes('init')) {
                 setScannerHint('Initializing OCR…')
               }
@@ -293,13 +401,13 @@ export default function ScannerView({ onScan }) {
 
         await worker.setParameters({
           tessedit_pageseg_mode: '6', // Assume a single uniform block of text
-          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/',
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -/',
         })
 
         ocrWorkerRef.current = worker
         if (mountedRef.current) {
           setOcrReady(true)
-          setScannerHint('Point at the printed model label')
+          setScannerHint('Align white label in box')
         }
         return worker
       } catch (err) {
@@ -314,10 +422,11 @@ export default function ScannerView({ onScan }) {
 
   // ── Consensus logic ────────────────────────────────────────────────────
   function acceptOcrCandidate(candidate, confidence, manual) {
-    if (!candidate) return false
+    if (!candidate || isGarbageToken(candidate)) return false
 
-    // Manual tap or reasonable confidence: accept immediately
-    const confirmed = manual || confidence >= 30 || ocrConsensusRef.current.text === candidate
+    // Manual snapshot: accept immediately if confidence is reasonable
+    // Auto scan: require confidence >= 35 or 2nd matching read
+    const confirmed = manual || confidence >= 35 || ocrConsensusRef.current.text === candidate
 
     if (!confirmed) {
       ocrConsensusRef.current = { text: candidate, count: 1 }
@@ -329,14 +438,20 @@ export default function ScannerView({ onScan }) {
     return emitDetected(candidate, 'ocr')
   }
 
-  // ── Run one OCR pass ───────────────────────────────────────────────────
+  // ── Run one OCR pass (Snap / Auto) ──────────────────────────────────────
   async function runOcr({ manual = false } = {}) {
     if (ocrBusyRef.current) return false
     if (!videoRef.current || videoRef.current.readyState < 2) return false
 
     ocrBusyRef.current = true
     if (mountedRef.current) setIsOcrRunning(true)
-    if (manual) setScannerHint('Reading label…')
+
+    if (manual) {
+      // Trigger snapshot flash animation
+      setShutterFlash(true)
+      setTimeout(() => setShutterFlash(false), 220)
+      setScannerHint('Reading snapshot…')
+    }
 
     try {
       const tesseract = await withTimeout(loadTesseract(), 8000, 'OCR engine load timed out')
@@ -345,6 +460,7 @@ export default function ScannerView({ onScan }) {
       const worker = await getOcrWorker(tesseract)
       if (!worker) throw new Error('OCR worker unavailable')
 
+      // Capture frame snapshot and isolate sticker
       const dataUrl = buildOcrImage(videoRef.current)
       const recognizePromise = worker.recognize(dataUrl)
       const result = await withTimeout(recognizePromise, 5000, 'OCR recognition timed out')
@@ -357,13 +473,13 @@ export default function ScannerView({ onScan }) {
         setLastRead(
           candidate
             ? `Read: "${candidate}" (${Math.round(confidence)}%)`
-            : (rawText.trim() ? `Seen: "${rawText.trim().slice(0, 15)}"` : 'No text seen')
+            : (rawText.trim() && !isGarbageToken(compactText(rawText)) ? `Seen: "${rawText.trim().slice(0, 15)}"` : '')
         )
       }
 
       if (!candidate) {
         if (manual && mountedRef.current) {
-          setScannerHint('Could not read label — align in center box')
+          setScannerHint('No clear model code found — align label & snap again')
         }
         return false
       }
@@ -371,11 +487,8 @@ export default function ScannerView({ onScan }) {
       return acceptOcrCandidate(candidate, confidence, manual)
     } catch (err) {
       console.error('[OCR] Error:', err)
-      if (mountedRef.current) {
-        setLastRead(`OCR note: ${err.message || 'scan retrying'}`)
-        if (manual) {
-          setScannerHint('Could not read — check lighting & hold steady')
-        }
+      if (mountedRef.current && manual) {
+        setScannerHint('Could not read — align label & tap again')
       }
       return false
     } finally {
@@ -462,7 +575,7 @@ export default function ScannerView({ onScan }) {
         }
 
         setIsInitializing(false)
-        setScannerHint('Point at the printed model label')
+        setScannerHint('Align white label in box')
       } catch (err) {
         if (!active) return
         console.error('[Camera] Start error:', err)
@@ -526,7 +639,7 @@ export default function ScannerView({ onScan }) {
     }
   }, [isInitializing, error, emitDetected])
 
-  // ── Auto OCR loop ──────────────────────────────────────────────────────
+  // ── Auto OCR loop (silent background pass) ───────────────────────────────
   useEffect(() => {
     if (isInitializing || error) return undefined
     let active = true
@@ -537,7 +650,6 @@ export default function ScannerView({ onScan }) {
       if (active) ocrTimerRef.current = setTimeout(autoLoop, OCR_INTERVAL_MS)
     }
 
-    // Delay first auto-OCR run to let camera focus stabilize
     ocrTimerRef.current = setTimeout(autoLoop, 1200)
 
     return () => {
@@ -580,7 +692,20 @@ export default function ScannerView({ onScan }) {
     >
       <video ref={videoRef} className="w-full h-full object-cover block" muted playsInline autoPlay />
 
-      {/* Scan overlay */}
+      {/* Snapshot Shutter Flash Effect */}
+      <AnimatePresence>
+        {shutterFlash && (
+          <motion.div
+            initial={{ opacity: 0.85 }}
+            animate={{ opacity: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="absolute inset-0 bg-white pointer-events-none z-30"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Scan Reticle Overlay */}
       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
         <div className="relative w-48 h-48 sm:w-56 sm:h-56 rounded-2xl ring-[4000px] ring-black/50">
           <div className="absolute top-0 left-0 w-7 h-7 border-t-3 border-l-3 border-sky-400 rounded-tl-xl" />
@@ -593,36 +718,14 @@ export default function ScannerView({ onScan }) {
             className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent shadow-[0_0_12px_#38bdf8]"
           />
         </div>
-        <div className="absolute bottom-3 bg-slate-900/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-white text-xs font-medium tracking-wide flex items-center gap-1.5 shadow-lg max-w-[92%]">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${isOcrRunning ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 animate-pulse'}`} />
-          <span className="truncate">
-            {scannerHint}
-            {lastRead ? ` • ${lastRead}` : ''}
-          </span>
-        </div>
       </div>
 
       {/* Top controls */}
       <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10 pointer-events-auto">
-        <button
-          type="button"
-          onClick={() => runOcr({ manual: true })}
-          disabled={isOcrRunning || isInitializing || Boolean(error)}
-          title="Read printed model text now"
-          className="h-10 px-3 rounded-full flex items-center justify-center gap-1.5 bg-slate-900/70 text-slate-100 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md text-xs font-semibold"
-        >
-          {isOcrRunning ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-              <span>Reading…</span>
-            </>
-          ) : (
-            <>
-              <ScanText className="w-4 h-4" />
-              <span>Read now</span>
-            </>
-          )}
-        </button>
+        <div className="bg-slate-900/75 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 text-white text-[11px] font-medium flex items-center gap-1.5 shadow-md">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${isOcrRunning ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+          <span className="truncate max-w-[170px]">{lastRead || scannerHint}</span>
+        </div>
 
         <div className="flex items-center gap-2">
           {hasTorch && (
@@ -648,6 +751,29 @@ export default function ScannerView({ onScan }) {
             <RefreshCw className="w-4.5 h-4.5" />
           </button>
         </div>
+      </div>
+
+      {/* Prominent Bottom "Snap & Read" Button */}
+      <div className="absolute bottom-3.5 left-0 right-0 flex justify-center items-center pointer-events-auto z-10 px-4">
+        <button
+          type="button"
+          onClick={() => runOcr({ manual: true })}
+          disabled={isOcrRunning || isInitializing || Boolean(error)}
+          title="Take sharp on-device snapshot & read text immediately"
+          className="px-5 py-2.5 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-xl shadow-sky-950/50 border border-sky-300/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isOcrRunning ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Analyzing…</span>
+            </>
+          ) : (
+            <>
+              <Camera className="w-4 h-4" />
+              <span>Snap & Read Label</span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Initializing overlay */}
