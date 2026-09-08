@@ -14,10 +14,10 @@ import {
   X,
   Check
 } from 'lucide-react'
-import { recognizeWithIdefics3, getIdeficsConfig, saveIdeficsConfig } from '../lib/ideficsOcr'
+import { recognizeWithIdefics3, getIdeficsConfig, saveIdeficsConfig, MODELS } from '../lib/ideficsOcr'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
-const OCR_INTERVAL_MS = 3200       // ms between auto Idefics3 reads (if token configured)
+const OCR_INTERVAL_MS = 3200       // ms between auto Vision reads (if token configured)
 const DUPLICATE_COOLDOWN_MS = 4000 // suppress re-emitting the same code
 
 // ─── Text & Garbage Filtering ─────────────────────────────────────────────────
@@ -55,7 +55,7 @@ function isUsefulToken(value) {
 }
 
 /**
- * Extract the best candidate model code from Idefics3 response text.
+ * Extract the best candidate model code from Vision AI response text.
  */
 function chooseCandidate(rawText) {
   if (!rawText) return null
@@ -174,10 +174,11 @@ export default function ScannerView({ onScan }) {
   const [shutterFlash, setShutterFlash] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
 
-  // Idefics3 configuration modal state
+  // Vision AI configuration modal state
   const [isConfigOpen, setIsConfigOpen] = useState(false)
-  const [configDraft, setConfigDraft] = useState({ token: '', endpoint: '' })
+  const [configDraft, setConfigDraft] = useState({ token: '', endpoint: '', model: '' })
   const [configVersion, setConfigVersion] = useState(0)
+
   const ideficsConfig = useMemo(() => {
     void configVersion
     return getIdeficsConfig()
@@ -198,24 +199,24 @@ export default function ScannerView({ onScan }) {
     if (lastCodeRef.current.text === text && now - lastCodeRef.current.at < DUPLICATE_COOLDOWN_MS) return false
 
     lastCodeRef.current = { text, at: now }
-    setScannerHint(source === 'idefics' ? `✓ Idefics3: ${text}` : `✓ Scanned code: ${text}`)
+    setScannerHint(source === 'vision' ? `✓ Vision AI: ${text}` : `✓ Scanned code: ${text}`)
     setLastRead(`Detected: ${text}`)
     try { if (navigator.vibrate) navigator.vibrate(50) } catch {}
     onScanRef.current?.(text)
     return true
   }, [])
 
-  // ── Run Idefics3 OCR Pass ───────────────────────────────────────────────
-  async function runIdeficsOcr({ manual = false } = {}) {
+  // ── Run Vision AI OCR Pass ──────────────────────────────────────────────
+  async function runVisionOcr({ manual = false } = {}) {
     if (ocrBusyRef.current) return false
     if (!videoRef.current || videoRef.current.readyState < 2) return false
 
     const currentConfig = getIdeficsConfig()
     if (!currentConfig.token && !currentConfig.endpoint.includes('localhost')) {
       if (manual) {
-        setConfigDraft({ token: currentConfig.token, endpoint: currentConfig.endpoint })
+        setConfigDraft({ token: currentConfig.token, endpoint: currentConfig.endpoint, model: currentConfig.model })
         setIsConfigOpen(true)
-        setScannerHint('Configure Hugging Face token for Idefics3')
+        setScannerHint('Configure Hugging Face token for Vision AI')
       }
       return false
     }
@@ -226,7 +227,7 @@ export default function ScannerView({ onScan }) {
     if (manual) {
       setShutterFlash(true)
       setTimeout(() => setShutterFlash(false), 220)
-      setScannerHint('Analyzing with Idefics3 Vision AI…')
+      setScannerHint('Analyzing with Vision AI…')
     }
 
     try {
@@ -239,7 +240,7 @@ export default function ScannerView({ onScan }) {
       if (mountedRef.current) {
         setLastRead(
           candidate 
-            ? `Idefics3: "${candidate}" (${result.latencyMs}ms)`
+            ? `AI: "${candidate}" (${result.latencyMs}ms)`
             : (rawText.trim() ? `Seen: "${rawText.slice(0, 18)}"` : '')
         )
       }
@@ -251,11 +252,11 @@ export default function ScannerView({ onScan }) {
         return false
       }
 
-      return emitDetected(candidate, 'idefics')
+      return emitDetected(candidate, 'vision')
     } catch (err) {
-      console.error('[Idefics3 OCR] Error:', err)
+      console.error('[Vision OCR] Error:', err)
       if (mountedRef.current) {
-        setScannerHint(err.message || 'Idefics3 vision call failed')
+        setScannerHint(err.message || 'Vision AI call failed')
         if (err.message.includes('API key')) {
           setIsConfigOpen(true)
         }
@@ -268,7 +269,7 @@ export default function ScannerView({ onScan }) {
   }
 
   useEffect(() => {
-    runOcrRef.current = runIdeficsOcr
+    runOcrRef.current = runVisionOcr
   })
 
   // ── Camera startup ──────────────────────────────────────────────────────
@@ -392,14 +393,13 @@ export default function ScannerView({ onScan }) {
     }
   }, [isInitializing, error, emitDetected])
 
-  // ── Auto OCR loop (if configured) ───────────────────────────────────────
+  // ── Auto Vision loop (if token configured) ──────────────────────────────
   useEffect(() => {
     if (isInitializing || error) return undefined
     let active = true
 
     async function autoLoop() {
       if (!active) return
-      // Auto run only if user has an active token configured
       const cfg = getIdeficsConfig()
       if (cfg.token) {
         await runOcrRef.current?.()
@@ -444,7 +444,7 @@ export default function ScannerView({ onScan }) {
     saveIdeficsConfig(configDraft)
     setConfigVersion((v) => v + 1)
     setIsConfigOpen(false)
-    setScannerHint('Idefics3 token configured')
+    setScannerHint('Vision AI configured')
   }
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -504,20 +504,20 @@ export default function ScannerView({ onScan }) {
               <span className="truncate">{lastRead || scannerHint}</span>
             </div>
 
-            {/* Idefics3 Engine Badge */}
+            {/* Vision Engine Badge */}
             <button
               type="button"
               onClick={() => {
                 const cfg = getIdeficsConfig()
-                setConfigDraft({ token: cfg.token, endpoint: cfg.endpoint })
+                setConfigDraft({ token: cfg.token, endpoint: cfg.endpoint, model: cfg.model })
                 setIsConfigOpen(true)
               }}
-              title="Click to configure Idefics3 token or endpoint"
+              title="Click to configure Vision AI model or token"
               className="hidden xs:flex bg-indigo-950/80 hover:bg-indigo-900/80 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-indigo-500/30 text-[10px] text-indigo-300 items-center gap-1 shadow-sm shrink-0 transition-all cursor-pointer active:scale-95"
             >
               <Sparkles className="w-3 h-3 text-indigo-400" />
-              <span className="font-semibold text-white">Idefics3 OCR</span>
-              {!hasHfToken && <span className="text-[9px] text-amber-400 font-bold ml-0.5">Setup</span>}
+              <span className="font-semibold text-white">Vision AI</span>
+              {!ideficsConfig.hasToken && <span className="text-[9px] text-amber-400 font-bold ml-0.5">Setup</span>}
             </button>
           </div>
 
@@ -526,9 +526,9 @@ export default function ScannerView({ onScan }) {
             {isMinimized && (
               <button
                 type="button"
-                onClick={() => runIdeficsOcr({ manual: true })}
+                onClick={() => runVisionOcr({ manual: true })}
                 disabled={isOcrRunning || isInitializing || Boolean(error)}
-                title="Snap with Idefics3"
+                title="Snap with Vision AI"
                 className="h-8 px-2.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 shadow-md disabled:opacity-50"
               >
                 {isOcrRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
@@ -541,10 +541,10 @@ export default function ScannerView({ onScan }) {
               type="button"
               onClick={() => {
                 const cfg = getIdeficsConfig()
-                setConfigDraft({ token: cfg.token, endpoint: cfg.endpoint })
+                setConfigDraft({ token: cfg.token, endpoint: cfg.endpoint, model: cfg.model })
                 setIsConfigOpen(true)
               }}
-              title="Configure Idefics3 API Key"
+              title="Configure Vision AI Model & Token"
               className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-slate-900/70 text-slate-200 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 active:scale-95 transition-all shadow-md"
             >
               <Key className="w-4 h-4 text-indigo-300" />
@@ -593,20 +593,20 @@ export default function ScannerView({ onScan }) {
           <div className="absolute bottom-2.5 left-0 right-0 flex justify-center items-center pointer-events-auto z-10 px-4">
             <button
               type="button"
-              onClick={() => runIdeficsOcr({ manual: true })}
+              onClick={() => runVisionOcr({ manual: true })}
               disabled={isOcrRunning || isInitializing || Boolean(error)}
-              title="Analyze label with Idefics3 Vision Model"
+              title="Analyze label with Vision AI"
               className="px-4 py-2 rounded-full bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-xl shadow-indigo-950/50 border border-indigo-300/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isOcrRunning ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Idefics3 Reading…</span>
+                  <span>AI Reading Label…</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
-                  <span>Snap with Idefics3</span>
+                  <span>Snap with Vision AI</span>
                 </>
               )}
             </button>
@@ -648,7 +648,7 @@ export default function ScannerView({ onScan }) {
         </AnimatePresence>
       </motion.div>
 
-      {/* Idefics3 API Settings Modal */}
+      {/* Vision AI API Settings Modal */}
       <AnimatePresence>
         {isConfigOpen && (
           <motion.div
@@ -667,11 +667,11 @@ export default function ScannerView({ onScan }) {
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <Sparkles className="w-4 h-4 text-indigo-600" />
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">Idefics3 OCR Setup</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">Vision AI OCR Setup</span>
                   </div>
-                  <h3 className="text-xl font-black text-slate-900">Hugging Face Idefics3</h3>
+                  <h3 className="text-xl font-black text-slate-900">Hugging Face Vision AI</h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Powered by <span className="font-mono font-bold text-slate-700">{ideficsConfig.model}</span> for state-of-the-art visual label OCR.
+                    State-of-the-art vision models for reading labels, packaging, and model codes.
                   </p>
                 </div>
                 <button
@@ -684,6 +684,25 @@ export default function ScannerView({ onScan }) {
               </div>
 
               <form onSubmit={handleSaveConfig} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Vision AI Model
+                  </label>
+                  <select
+                    value={configDraft.model || ideficsConfig.model}
+                    onChange={(e) => setConfigDraft({ ...configDraft, model: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  >
+                    <option value={MODELS.SERVERLESS_VISION}>Qwen 2.5 VL 72B (Free HF Serverless - Active)</option>
+                    <option value={MODELS.IDEFICS3}>Idefics3 8B (Dedicated Endpoint / Self-Hosted)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    {configDraft.model === MODELS.IDEFICS3 
+                      ? 'Note: Idefics3 8B requires a dedicated HF Endpoint or self-hosted server.'
+                      : 'Recommended: Works with free HF tokens on the serverless router.'}
+                  </p>
+                </div>
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Hugging Face Access Token (free)
@@ -710,17 +729,17 @@ export default function ScannerView({ onScan }) {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Custom Endpoint (Optional)
+                    Custom Endpoint URL (Optional)
                   </label>
                   <input
                     type="text"
                     value={configDraft.endpoint}
                     onChange={(e) => setConfigDraft({ ...configDraft, endpoint: e.target.value })}
-                    placeholder={ideficsConfig.endpoint}
+                    placeholder="https://router.huggingface.co/v1/chat/completions"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Leave blank to use default Hugging Face Serverless Inference Router.
+                    Leave blank to use default Hugging Face Serverless Router.
                   </p>
                 </div>
 

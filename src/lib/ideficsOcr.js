@@ -1,42 +1,54 @@
 /**
- * Idefics3 Vision-Language OCR Service
+ * Vision-Language AI OCR Service
  * 
- * Powered by HuggingFaceM4/Idefics3-8B-Llama3.
  * Supports:
- * 1. Hugging Face Serverless Inference API (OpenAI-compatible Vision Chat Completions)
- * 2. Hugging Face Direct Task Inference API (/hf-inference/models/...)
- * 3. Custom or self-hosted Idefics3 endpoints (vLLM, Ollama, TGI, or Gradio proxy)
- * 4. Configuration via environment variables or localStorage
+ * 1. Hugging Face Serverless Inference (Qwen2.5-VL-72B-Instruct - free & active)
+ * 2. Hugging Face Idefics3 (HuggingFaceM4/Idefics3-8B-Llama3 via Dedicated Endpoint or self-hosted)
+ * 3. Automatic fallback so scans never fail with 400 "Model not supported"
  */
 
-export const DEFAULT_MODEL = 'HuggingFaceM4/Idefics3-8B-Llama3'
+export const MODELS = {
+  SERVERLESS_VISION: 'Qwen/Qwen2.5-VL-72B-Instruct', // Free active Vision model on HF Router
+  IDEFICS3: 'HuggingFaceM4/Idefics3-8B-Llama3',      // Dedicated endpoint / self-hosted
+}
+
+export const DEFAULT_MODEL = MODELS.SERVERLESS_VISION
 export const DEFAULT_ENDPOINT = 'https://router.huggingface.co/v1/chat/completions'
 
 export function getIdeficsConfig() {
   const envToken = import.meta.env.VITE_HUGGINGFACE_API_KEY || import.meta.env.VITE_HF_TOKEN || ''
   const envEndpoint = import.meta.env.VITE_IDEFICS_ENDPOINT || ''
+  const envModel = import.meta.env.VITE_VISION_MODEL || ''
 
   let localToken = ''
   let localEndpoint = ''
+  let localModel = ''
+
   if (typeof localStorage !== 'undefined') {
     localToken = localStorage.getItem('idefics_hf_token') || ''
     localEndpoint = localStorage.getItem('idefics_endpoint') || ''
-    // Clean up any previously saved malformed 404 endpoint
-    if (localEndpoint.includes('/v1/chat/completions') && localEndpoint.includes('/models/')) {
+    localModel = localStorage.getItem('idefics_model') || ''
+
+    // Clean up any previously saved invalid endpoints
+    if (localEndpoint.includes('/models/') && localEndpoint.includes('/chat/completions')) {
       localEndpoint = ''
       localStorage.removeItem('idefics_endpoint')
     }
   }
 
+  const token = localToken || envToken || ''
+  const endpoint = localEndpoint || envEndpoint || DEFAULT_ENDPOINT
+  const model = localModel || envModel || DEFAULT_MODEL
+
   return {
-    token: localToken || envToken || '',
-    endpoint: localEndpoint || envEndpoint || DEFAULT_ENDPOINT,
-    model: DEFAULT_MODEL,
-    hasToken: Boolean(localToken || envToken),
+    token,
+    endpoint,
+    model,
+    hasToken: Boolean(token),
   }
 }
 
-export function saveIdeficsConfig({ token, endpoint }) {
+export function saveIdeficsConfig({ token, endpoint, model }) {
   if (typeof localStorage === 'undefined') return
   if (token !== undefined) {
     if (token.trim()) {
@@ -52,10 +64,17 @@ export function saveIdeficsConfig({ token, endpoint }) {
       localStorage.removeItem('idefics_endpoint')
     }
   }
+  if (model !== undefined) {
+    if (model.trim()) {
+      localStorage.setItem('idefics_model', model.trim())
+    } else {
+      localStorage.removeItem('idefics_model')
+    }
+  }
 }
 
 /**
- * Sends a captured image snapshot to Idefics3 Vision AI for model code extraction.
+ * Sends a captured image snapshot to Vision AI for model code extraction.
  * 
  * @param {Object} options
  * @param {string} options.dataUrl Base64 JPEG data URL of the image
@@ -80,66 +99,62 @@ export async function recognizeWithIdefics3({ dataUrl, customPrompt = '' }) {
     headers['Authorization'] = `Bearer ${config.token.trim()}`
   }
 
-  const isChatCompletions = config.endpoint.includes('/chat/completions')
-
-  const payload = isChatCompletions
-    ? {
-        model: config.model,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: systemInstruction,
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: dataUrl,
-                },
-              },
-            ],
+  // Helper to send a chat completion request with a specific model
+  async function sendVisionRequest(targetModel, targetEndpoint, signal) {
+    const isChat = targetEndpoint.includes('/chat/completions')
+    const payload = isChat
+      ? {
+          model: targetModel,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: systemInstruction },
+                { type: 'image_url', image_url: { url: dataUrl } },
+              ],
+            },
+          ],
+          max_tokens: 30,
+          temperature: 0.1,
+        }
+      : {
+          inputs: dataUrl,
+          parameters: {
+            prompt: systemInstruction,
+            max_new_tokens: 30,
           },
-        ],
-        max_tokens: 30,
-        temperature: 0.1,
-      }
-    : {
-        inputs: dataUrl,
-        parameters: {
-          prompt: systemInstruction,
-          max_new_tokens: 30,
-        },
-      }
+        }
+
+    return fetch(targetEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    })
+  }
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 20000)
 
   try {
-    let response = await fetch(config.endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
+    let activeModel = config.model
+    let response = await sendVisionRequest(activeModel, config.endpoint, controller.signal)
+
+    // If the requested model is not supported by the free serverless provider (HF error 400),
+    // automatically fallback to the active serverless vision model on the router
+    if (response.status === 400) {
+      const errText = await response.clone().text().catch(() => '')
+      if (errText.includes('not supported by provider') || errText.includes('model_not_supported')) {
+        console.warn(`[Vision OCR] Model ${activeModel} not supported on free serverless tier. Falling back to ${MODELS.SERVERLESS_VISION}...`)
+        activeModel = MODELS.SERVERLESS_VISION
+        response = await sendVisionRequest(activeModel, DEFAULT_ENDPOINT, controller.signal)
+      }
+    }
 
     // If chat completions returned 404, fallback to direct HF inference endpoint
-    if (response.status === 404 && isChatCompletions && !config.endpoint.includes('localhost')) {
-      const fallbackEndpoint = `https://router.huggingface.co/hf-inference/models/${config.model}`
-      const directPayload = {
-        inputs: dataUrl,
-        parameters: {
-          prompt: systemInstruction,
-          max_new_tokens: 30,
-        },
-      }
-      response = await fetch(fallbackEndpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(directPayload),
-        signal: controller.signal,
-      })
+    if (response.status === 404 && config.endpoint.includes('/chat/completions') && !config.endpoint.includes('localhost')) {
+      const fallbackEndpoint = `https://router.huggingface.co/hf-inference/models/${activeModel}`
+      response = await sendVisionRequest(activeModel, fallbackEndpoint, controller.signal)
     }
 
     const latencyMs = Math.round(performance.now() - startTime)
@@ -149,18 +164,12 @@ export async function recognizeWithIdefics3({ dataUrl, customPrompt = '' }) {
     }
 
     if (response.status === 503) {
-      throw new Error('Idefics3 model is currently cold/loading on Hugging Face. Please retry in 15 seconds.')
-    }
-
-    if (response.status === 404) {
-      throw new Error(
-        `Idefics3 endpoint returned 404. Model ${config.model} is not deployed on this serverless route. You can specify an Inference Endpoint or local URL in Setup.`
-      )
+      throw new Error('Vision model is currently loading on Hugging Face. Please retry in 15 seconds.')
     }
 
     if (!response.ok) {
       const errBody = await response.text().catch(() => '')
-      throw new Error(`Idefics3 API error (${response.status}): ${errBody.slice(0, 140)}`)
+      throw new Error(`Vision API error (${response.status}): ${errBody.slice(0, 140)}`)
     }
 
     const data = await response.json()
@@ -181,11 +190,11 @@ export async function recognizeWithIdefics3({ dataUrl, customPrompt = '' }) {
     return {
       rawText: extractedText.trim(),
       latencyMs,
-      model: config.model,
+      model: activeModel,
     }
   } catch (err) {
     if (err.name === 'AbortError') {
-      throw new Error('Idefics3 request timed out after 20 seconds.')
+      throw new Error('Vision OCR request timed out after 20 seconds.')
     }
     throw err
   } finally {
