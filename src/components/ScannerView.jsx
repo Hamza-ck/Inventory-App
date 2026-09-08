@@ -4,9 +4,9 @@ import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, ScanText, Loader2 } from '
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 const OCR_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
-const OCR_INTERVAL_MS = 1800       // ms between auto OCR reads
+const FAST_LANG_PATH = 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast'
+const OCR_INTERVAL_MS = 1600       // ms between auto OCR reads
 const DUPLICATE_COOLDOWN_MS = 4000 // suppress re-emitting the same code
-const OCR_CONSENSUS_NEEDED = 2     // require N consecutive reads if confidence < 45
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ function chooseCandidate(rawText) {
   const lines = source.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean)
   const candidates = []
 
-  // Check whole lines compacted (e.g. "G 64" -> "G64", "V 22" -> "V22")
+  // 1. Check whole lines compacted (e.g. "G 64" -> "G64", "V 22" -> "V22")
   for (const line of lines) {
     const compacted = compactText(line)
     if (isUsefulToken(compacted)) {
@@ -47,7 +47,17 @@ function chooseCandidate(rawText) {
     }
   }
 
-  // Split into tokens by common separators
+  // 2. Direct regex search for common model pattern (e.g. G64, V22, F31, A6PRO, S23)
+  const modelRegex = /\b([A-Z]{1,3}\s*[-]?\s*[0-9]{1,4}[A-Z]{0,3})\b/g
+  let match
+  while ((match = modelRegex.exec(source)) !== null) {
+    const cleaned = compactText(match[1])
+    if (isUsefulToken(cleaned)) {
+      candidates.push(cleaned)
+    }
+  }
+
+  // 3. Split into tokens by common separators
   const words = source
     .split(/[\s,;|/:_\\()[\]{}<>-]+/)
     .map(compactText)
@@ -59,7 +69,7 @@ function chooseCandidate(rawText) {
     }
   }
 
-  // Check adjacent word pairs (e.g. "G" + "64" -> "G64", "NOTE" + "10" -> "NOTE10")
+  // 4. Check adjacent word pairs (e.g. "G" + "64" -> "G64", "NOTE" + "10" -> "NOTE10")
   for (let i = 0; i < words.length - 1; i++) {
     const pair = words[i] + words[i + 1]
     if (isUsefulToken(pair)) {
@@ -82,25 +92,6 @@ function chooseCandidate(rawText) {
 }
 
 /**
- * Quick hash of the video frame to skip OCR when the camera view hasn't changed.
- */
-function makeFingerprint(video) {
-  if (!video?.videoWidth || !video?.videoHeight) return null
-  const canvas = document.createElement('canvas')
-  canvas.width = 32
-  canvas.height = 18
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return null
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
-  let hash = 0
-  for (let i = 0; i < data.length; i += 8) {
-    hash = (hash * 31 + data[i]) | 0
-  }
-  return hash
-}
-
-/**
  * Timeout wrapper for promises to prevent infinite stalls on network or worker hangs.
  */
 function withTimeout(promise, ms, message) {
@@ -116,21 +107,20 @@ function withTimeout(promise, ms, message) {
 /**
  * Crop and preprocess the center scan window area for fast, accurate OCR.
  * - Targets the exact reticle region
- * - Clamps max width to 560px (under 0.2 megapixels for instant 100ms recognition)
- * - Enhances contrast to sharpen text and filter plastic glare
+ * - Clamps max width to 560px for sub-200ms processing
+ * - Returns a standard JPEG Data URL for reliable Web Worker ingestion
  */
 function buildOcrImage(video) {
   const width = video.videoWidth || 1280
   const height = video.videoHeight || 720
 
-  // The reticle box is in the center of the video feed.
-  // Crop a region matching the center scan box with modest padding
-  const cropWidth = Math.floor(width * 0.52)
-  const cropHeight = Math.floor(height * 0.42)
+  // Center crop matching the scan reticle with padding
+  const cropWidth = Math.floor(width * 0.55)
+  const cropHeight = Math.floor(height * 0.45)
   const sx = Math.floor((width - cropWidth) / 2)
   const sy = Math.floor((height - cropHeight) / 2)
 
-  // Clamp target resolution for OCR (optimal font height for Tesseract LSTM)
+  // Clamp target resolution for fast LSTM recognition
   const targetWidth = Math.min(560, cropWidth)
   const scale = targetWidth / cropWidth
   const targetHeight = Math.round(cropHeight * scale)
@@ -145,7 +135,7 @@ function buildOcrImage(video) {
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight)
 
-  // Grayscale & contrast enhancement
+  // Grayscale & contrast stretch
   const image = ctx.getImageData(0, 0, targetWidth, targetHeight)
   const d = image.data
 
@@ -168,9 +158,9 @@ function buildOcrImage(video) {
     if (canStretch) {
       val = Math.round(((val - minLum) / range) * 255)
     }
-    // Boost dark text and suppress midtone plastic reflections
-    if (val < 100) {
-      val = Math.max(0, Math.round(val * 0.55))
+    // Deepen dark text and brighten paper background
+    if (val < 95) {
+      val = Math.max(0, Math.round(val * 0.5))
     } else if (val > 150) {
       val = Math.min(255, Math.round(val * 1.15))
     }
@@ -182,16 +172,11 @@ function buildOcrImage(video) {
   }
 
   ctx.putImageData(image, 0, 0)
-  return canvas
+  // Convert to Data URL: fixes worker postMessage serialization issues with raw canvas
+  return canvas.toDataURL('image/jpeg', 0.85)
 }
 
-// ─── Tesseract Loader & Fast Model Path ───────────────────────────────────────
-
-const FAST_LANG_PATH = 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast'
-
-function getLangPath() {
-  return FAST_LANG_PATH
-}
+// ─── Tesseract Loader ─────────────────────────────────────────────────────────
 
 let tesseractLoadPromise = null
 
@@ -243,7 +228,6 @@ export default function ScannerView({ onScan }) {
   const workerInitPromiseRef = useRef(null)
   const ocrConsensusRef = useRef({ text: null, count: 0 })
   const lastCodeRef = useRef({ text: null, at: 0 })
-  const lastOcrFingerprintRef = useRef(null)
   const barcodeFrameRef = useRef(null)
   const ocrTimerRef = useRef(null)
   const runOcrRef = useRef(null)
@@ -257,6 +241,7 @@ export default function ScannerView({ onScan }) {
   const [isOcrRunning, setIsOcrRunning] = useState(false)
   const [, setOcrReady] = useState(false)
   const [scannerHint, setScannerHint] = useState('Starting camera…')
+  const [lastRead, setLastRead] = useState('')
 
   useEffect(() => { onScanRef.current = onScan }, [onScan])
   useEffect(() => {
@@ -273,7 +258,8 @@ export default function ScannerView({ onScan }) {
 
     lastCodeRef.current = { text, at: now }
     setScannerHint(source === 'ocr' ? `✓ Read label: ${text}` : `✓ Scanned code: ${text}`)
-    try { if (navigator.vibrate) navigator.vibrate(40) } catch {}
+    setLastRead(`Detected: ${text}`)
+    try { if (navigator.vibrate) navigator.vibrate(45) } catch {}
     onScanRef.current?.(text)
     return true
   }, [])
@@ -285,11 +271,10 @@ export default function ScannerView({ onScan }) {
 
     workerInitPromiseRef.current = (async () => {
       try {
-        const langPath = await getLangPath()
         if (mountedRef.current) setScannerHint('Loading OCR engine…')
 
         const createPromise = tesseract.createWorker('eng', 1, {
-          langPath,
+          langPath: FAST_LANG_PATH,
           gzip: true,
           logger: (m) => {
             if (!mountedRef.current) return
@@ -331,20 +316,11 @@ export default function ScannerView({ onScan }) {
   function acceptOcrCandidate(candidate, confidence, manual) {
     if (!candidate) return false
 
-    const current = ocrConsensusRef.current
-    if (current.text === candidate) {
-      current.count += 1
-    } else {
-      ocrConsensusRef.current = { text: candidate, count: 1 }
-    }
-
-    // Manual reads: accept immediately if confidence is at least 20
-    // Auto reads: accept immediately if confidence >= 45 (or 2 consecutive reads if lower)
-    const confirmed = manual
-      ? confidence >= 20
-      : confidence >= 45 || ocrConsensusRef.current.count >= OCR_CONSENSUS_NEEDED
+    // Manual tap or reasonable confidence: accept immediately
+    const confirmed = manual || confidence >= 30 || ocrConsensusRef.current.text === candidate
 
     if (!confirmed) {
+      ocrConsensusRef.current = { text: candidate, count: 1 }
       setScannerHint(`Verifying: ${candidate}…`)
       return false
     }
@@ -358,10 +334,6 @@ export default function ScannerView({ onScan }) {
     if (ocrBusyRef.current) return false
     if (!videoRef.current || videoRef.current.readyState < 2) return false
 
-    // Skip if the frame hasn't changed (saves CPU)
-    const fingerprint = makeFingerprint(videoRef.current)
-    if (!manual && fingerprint !== null && fingerprint === lastOcrFingerprintRef.current) return false
-
     ocrBusyRef.current = true
     if (mountedRef.current) setIsOcrRunning(true)
     if (manual) setScannerHint('Reading label…')
@@ -373,19 +345,25 @@ export default function ScannerView({ onScan }) {
       const worker = await getOcrWorker(tesseract)
       if (!worker) throw new Error('OCR worker unavailable')
 
-      const image = buildOcrImage(videoRef.current)
-      const recognizePromise = worker.recognize(image)
-      const result = await withTimeout(recognizePromise, 4000, 'OCR recognition timed out')
+      const dataUrl = buildOcrImage(videoRef.current)
+      const recognizePromise = worker.recognize(dataUrl)
+      const result = await withTimeout(recognizePromise, 5000, 'OCR recognition timed out')
 
       const rawText = result?.data?.text || ''
       const confidence = Number(result?.data?.confidence || 0)
       const candidate = chooseCandidate(rawText)
 
-      lastOcrFingerprintRef.current = makeFingerprint(videoRef.current) ?? fingerprint
+      if (mountedRef.current) {
+        setLastRead(
+          candidate
+            ? `Read: "${candidate}" (${Math.round(confidence)}%)`
+            : (rawText.trim() ? `Seen: "${rawText.trim().slice(0, 15)}"` : 'No text seen')
+        )
+      }
 
       if (!candidate) {
         if (manual && mountedRef.current) {
-          setScannerHint('Could not read label — hold steady & align in box')
+          setScannerHint('Could not read label — align in center box')
         }
         return false
       }
@@ -393,8 +371,11 @@ export default function ScannerView({ onScan }) {
       return acceptOcrCandidate(candidate, confidence, manual)
     } catch (err) {
       console.error('[OCR] Error:', err)
-      if (manual && mountedRef.current) {
-        setScannerHint('Could not read — try better lighting or hold steady')
+      if (mountedRef.current) {
+        setLastRead(`OCR note: ${err.message || 'scan retrying'}`)
+        if (manual) {
+          setScannerHint('Could not read — check lighting & hold steady')
+        }
       }
       return false
     } finally {
@@ -414,7 +395,6 @@ export default function ScannerView({ onScan }) {
     setError(null)
     setTorchOn(false)
     setScannerHint('Starting camera…')
-    lastOcrFingerprintRef.current = null
 
     async function startCamera() {
       try {
@@ -613,9 +593,12 @@ export default function ScannerView({ onScan }) {
             className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent shadow-[0_0_12px_#38bdf8]"
           />
         </div>
-        <div className="absolute bottom-4 bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-white text-xs font-medium tracking-wide flex items-center gap-1.5 shadow-lg max-w-[90%]">
+        <div className="absolute bottom-3 bg-slate-900/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-white text-xs font-medium tracking-wide flex items-center gap-1.5 shadow-lg max-w-[92%]">
           <span className={`w-2 h-2 rounded-full shrink-0 ${isOcrRunning ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 animate-pulse'}`} />
-          <span className="truncate">{scannerHint}</span>
+          <span className="truncate">
+            {scannerHint}
+            {lastRead ? ` • ${lastRead}` : ''}
+          </span>
         </div>
       </div>
 
