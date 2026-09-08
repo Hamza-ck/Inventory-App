@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, Loader2, Minimize2, Maximize2 } from 'lucide-react'
-import {
-  recognizeText,
-  getActiveEngineDetails,
-  terminateOcrWorker,
-  getUniversalWorker,
-  OCR_ENGINE_TYPES,
-  OCR_ENGINE_LABELS,
-} from '../lib/ocrEngine'
+import { 
+  Zap, 
+  ZapOff, 
+  RefreshCw, 
+  AlertCircle, 
+  Camera, 
+  Loader2, 
+  Minimize2, 
+  Maximize2,
+  Sparkles,
+  Key,
+  X,
+  Check
+} from 'lucide-react'
+import { recognizeWithIdefics3, getIdeficsConfig, saveIdeficsConfig } from '../lib/ideficsOcr'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
-const OCR_INTERVAL_MS = 1600       // ms between auto OCR reads
+const OCR_INTERVAL_MS = 3200       // ms between auto Idefics3 reads (if token configured)
 const DUPLICATE_COOLDOWN_MS = 4000 // suppress re-emitting the same code
 
 // ─── Text & Garbage Filtering ─────────────────────────────────────────────────
@@ -24,22 +30,12 @@ function compactText(value) {
   return normalizeText(value).replace(/[^a-z0-9]/gi, '').toUpperCase()
 }
 
-/**
- * Strict check to reject OCR garbage (wood grain, plastic reflections, shadow lines).
- */
 function isGarbageToken(token) {
-  if (!token || token.length < 2 || token.length > 12) return true
+  if (!token || token.length < 2 || token.length > 16) return true
 
-  // Only 1s, Is, Ls, pipes (e.g. "II", "1I1", "|||") from packaging seams
+  // Packaging seams or repeated pipes/1s/0s
   if (/^[I1lL|]+$/i.test(token)) return true
-
-  // Only 0s and Os (e.g. "OO", "0O0")
   if (/^[O0]+$/i.test(token)) return true
-
-  // Ambiguous 2-char pairs caused by reflection glare
-  if (token.length === 2 && /^(I1|1I|O0|0O|S5|5S|Z2|2Z|B8|8B)$/i.test(token)) return true
-
-  // Repetitive character strings e.g. "AAAA", "1111", "XXXX"
   if (/^(.)\1+$/.test(token)) return true
 
   // Must contain at least one Latin letter (A-Z) AND at least one digit (0-9)
@@ -47,27 +43,19 @@ function isGarbageToken(token) {
   const hasDigit = /[0-9]/.test(token)
   if (!hasLetter || !hasDigit) return true
 
-  // Reject packaging quantity/unit descriptors, not model codes
-  // e.g. "50PCS", "2MM", "10SET", "1PC", "3PACK", "5KG"
+  // Reject unit quantities (e.g. 50PCS, 2MM, 10SET, 5KG)
   if (/^[0-9]{1,4}(PCS?|MM|CM|KG|SET|PACK|LOT|QTY)$/i.test(token)) return true
-
-  // For 2-char tokens, reject if starts with ambiguous glare letters
-  if (token.length === 2 && /^[IOLZ10]/i.test(token)) return true
 
   return false
 }
 
-/**
- * Check if a token looks like a valid model code (e.g. G64, V22, F31, A6PRO).
- */
 function isUsefulToken(value) {
   const text = compactText(value)
   return !isGarbageToken(text)
 }
 
 /**
- * Extract the best model candidate from raw OCR text.
- * Prioritizes clean patterns like G64, V22, F31 and discards glare noise.
+ * Extract the best candidate model code from Idefics3 response text.
  */
 function chooseCandidate(rawText) {
   if (!rawText) return null
@@ -76,7 +64,7 @@ function chooseCandidate(rawText) {
   const lines = source.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean)
   const candidates = []
 
-  // 1. Check whole lines compacted (e.g. "G 64" -> "G64", "V 22" -> "V22")
+  // 1. Whole lines compacted
   for (const line of lines) {
     const compacted = compactText(line)
     if (isUsefulToken(compacted)) {
@@ -94,7 +82,7 @@ function chooseCandidate(rawText) {
     }
   }
 
-  // 3. Split into words by common punctuation
+  // 3. Individual words
   const words = source
     .split(/[\s,;|/:_\\()[\]{}<>-]+/)
     .map(compactText)
@@ -106,7 +94,7 @@ function chooseCandidate(rawText) {
     }
   }
 
-  // 4. Check adjacent word pairs (e.g. "G" + "64" -> "G64", "NOTE" + "10" -> "NOTE10")
+  // 4. Word pairs
   for (let i = 0; i < words.length - 1; i++) {
     const pair = words[i] + words[i + 1]
     if (isUsefulToken(pair)) {
@@ -117,7 +105,6 @@ function chooseCandidate(rawText) {
   const unique = [...new Set(candidates)]
   if (unique.length === 0) return null
 
-  // Score: prefer 3-6 char tokens (V22, F31, G64, A6PRO), penalize very long ones
   unique.sort((a, b) => {
     const idealLen = 4
     const aScore = Math.abs(a.length - idealLen) + (a.length > 8 ? 4 : 0)
@@ -128,201 +115,38 @@ function chooseCandidate(rawText) {
   return unique[0]
 }
 
-// ─── Image Processing & Label Sticker Isolation ──────────────────────────────
+// ─── Image Processing ─────────────────────────────────────────────────────────
 
-/**
- * Detect the white rectangular sticker patch inside the scanned reticle area.
- * Cuts away background clutter, wood grain, and dark phone edges.
- */
-function isolateLabelSticker(canvas) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return canvas
-
-  const width = canvas.width
-  const height = canvas.height
-  const imgData = ctx.getImageData(0, 0, width, height)
-  const d = imgData.data
-
-  let minX = width
-  let maxX = 0
-  let minY = height
-  let maxY = 0
-  let whiteCount = 0
-
-  // 3px sample grid for sub-millisecond execution
-  const step = 3
-  for (let y = 0; y < height; y += step) {
-    for (let x = 0; x < width; x += step) {
-      const idx = (y * width + x) * 4
-      const r = d[idx]
-      const g = d[idx + 1]
-      const b = d[idx + 2]
-
-      const lum = r * 0.299 + g * 0.587 + b * 0.114
-      const sat = Math.max(r, g, b) - Math.min(r, g, b)
-
-      // White label sticker is bright (lum > 165) and neutral (sat < 40)
-      if (lum > 165 && sat < 40) {
-        whiteCount++
-        if (x < minX) minX = x
-        if (x > maxX) maxX = x
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
-      }
-    }
-  }
-
-  const boxW = maxX - minX
-  const boxH = maxY - minY
-
-  // Plausible sticker detection check inside reticle
-  if (whiteCount > 40 && boxW > 35 && boxH > 18 && boxW < width * 0.94 && boxH < height * 0.94) {
-    const padX = 12
-    const padY = 8
-    const cropX = Math.max(0, minX - padX)
-    const cropY = Math.max(0, minY - padY)
-    const cropW = Math.min(width - cropX, boxW + padX * 2)
-    const cropH = Math.min(height - cropY, boxH + padY * 2)
-
-    const labelCanvas = document.createElement('canvas')
-    labelCanvas.width = cropW
-    labelCanvas.height = cropH
-    const labelCtx = labelCanvas.getContext('2d', { willReadFrequently: true })
-    if (labelCtx) {
-      labelCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
-      return labelCanvas
-    }
-  }
-
-  return canvas
-}
-
-/**
- * Deepen black text and maximize contrast against white sticker paper.
- */
-function enhanceContrast(canvas) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return canvas
-
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  const d = imgData.data
-
-  let minLum = 255
-  let maxLum = 0
-  const lums = new Uint8Array(d.length / 4)
-
-  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-    const lum = Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114)
-    lums[j] = lum
-    if (lum < minLum) minLum = lum
-    if (lum > maxLum) maxLum = lum
-  }
-
-  const range = maxLum - minLum
-  const canStretch = range > 35
-
-  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-    let val = lums[j]
-    if (canStretch) {
-      val = Math.round(((val - minLum) / range) * 255)
-    }
-    // Push black text to 0 and white paper to 255
-    if (val < 100) {
-      val = Math.max(0, Math.round(val * 0.45))
-    } else if (val > 140) {
-      val = Math.min(255, Math.round(val * 1.2))
-    }
-
-    d[i] = val
-    d[i + 1] = val
-    d[i + 2] = val
-    d[i + 3] = 255
-  }
-
-  ctx.putImageData(imgData, 0, 0)
-  return canvas
-}
-
-/**
- * Estimate image sharpness via gradient variance (Laplacian proxy).
- */
-function estimateSharpness(canvas) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return 0
-
-  const { width, height } = canvas
-  if (width < 3 || height < 3) return 0
-
-  const imgData = ctx.getImageData(0, 0, width, height)
-  const d = imgData.data
-
-  let sum = 0
-  let sumSq = 0
-  let count = 0
-  const step = 2
-
-  for (let y = 1; y < height - 1; y += step) {
-    for (let x = 1; x < width - 1; x += step) {
-      const idx = (y * width + x) * 4
-      const idxRight = (y * width + (x + 1)) * 4
-      const idxDown = ((y + 1) * width + x) * 4
-
-      const grad = Math.abs(d[idx] - d[idxRight]) + Math.abs(d[idx] - d[idxDown])
-      sum += grad
-      sumSq += grad * grad
-      count++
-    }
-  }
-
-  if (count === 0) return 0
-  const mean = sum / count
-  return Math.max(0, sumSq / count - mean * mean)
-}
-
-/**
- * Minimized canvas capture:
- * Focuses tightly on the center rectangular sticker area and limits resolution to 380px.
- * Cuts memory usage & accelerates OCR latency by ~40%.
- */
 function buildOcrImage(video) {
   const width = video.videoWidth || 1280
   const height = video.videoHeight || 720
 
-  // Minimized crop tailored to rectangular inventory stickers (approx 2:1 ratio)
-  const cropWidth = Math.floor(width * 0.48)
-  const cropHeight = Math.floor(height * 0.32)
+  // Focus center region matching the scan reticle
+  const cropWidth = Math.floor(width * 0.52)
+  const cropHeight = Math.floor(height * 0.36)
   const sx = Math.floor((width - cropWidth) / 2)
   const sy = Math.floor((height - cropHeight) / 2)
 
-  // Minimized canvas resolution (380px target) for faster recognition & less memory
-  const targetWidth = Math.min(380, cropWidth)
+  // Target resolution for vision model ingestion
+  const targetWidth = Math.min(512, cropWidth)
   const scale = targetWidth / cropWidth
   const targetHeight = Math.round(cropHeight * scale)
 
-  const initialCanvas = document.createElement('canvas')
-  initialCanvas.width = targetWidth
-  initialCanvas.height = targetHeight
-  const initialCtx = initialCanvas.getContext('2d', { willReadFrequently: true })
-  if (!initialCtx) throw new Error('Canvas context unavailable')
+  const canvas = document.createElement('canvas')
+  canvas.width = targetWidth
+  canvas.height = targetHeight
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) throw new Error('Canvas context unavailable')
 
-  initialCtx.imageSmoothingEnabled = true
-  initialCtx.imageSmoothingQuality = 'high'
-  initialCtx.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight)
-
-  // Step 1: Isolate the white sticker from background
-  const isolatedCanvas = isolateLabelSticker(initialCanvas)
-
-  // Step 2: Apply high-contrast black/white enhancement
-  const finalCanvas = enhanceContrast(isolatedCanvas)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight)
 
   return {
-    canvas: finalCanvas,
-    dataUrl: finalCanvas.toDataURL('image/jpeg', 0.88),
-    sharpness: estimateSharpness(finalCanvas),
+    canvas,
+    dataUrl: canvas.toDataURL('image/jpeg', 0.90),
   }
 }
-
-const MIN_SHARPNESS = 12 // frames below this are treated as motion-blurred
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -333,7 +157,6 @@ export default function ScannerView({ onScan }) {
   const barcodeDetectorRef = useRef(null)
   const onScanRef = useRef(onScan)
   const ocrBusyRef = useRef(false)
-  const ocrConsensusRef = useRef({ text: null, count: 0 })
   const lastCodeRef = useRef({ text: null, at: 0 })
   const barcodeFrameRef = useRef(null)
   const ocrTimerRef = useRef(null)
@@ -351,7 +174,12 @@ export default function ScannerView({ onScan }) {
   const [shutterFlash, setShutterFlash] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
 
-  const engineDetails = useMemo(() => getActiveEngineDetails(), [])
+  // Idefics3 configuration modal state
+  const [isConfigOpen, setIsConfigOpen] = useState(false)
+  const [configDraft, setConfigDraft] = useState({ token: '', endpoint: '' })
+  const [hasHfToken, setHasHfToken] = useState(() => getIdeficsConfig().hasToken)
+
+  const ideficsConfig = useMemo(() => getIdeficsConfig(), [hasHfToken])
 
   useEffect(() => { onScanRef.current = onScan }, [onScan])
   useEffect(() => {
@@ -368,35 +196,27 @@ export default function ScannerView({ onScan }) {
     if (lastCodeRef.current.text === text && now - lastCodeRef.current.at < DUPLICATE_COOLDOWN_MS) return false
 
     lastCodeRef.current = { text, at: now }
-    setScannerHint(source === 'ocr' ? `✓ Read label: ${text}` : `✓ Scanned code: ${text}`)
+    setScannerHint(source === 'idefics' ? `✓ Idefics3: ${text}` : `✓ Scanned code: ${text}`)
     setLastRead(`Detected: ${text}`)
     try { if (navigator.vibrate) navigator.vibrate(50) } catch {}
     onScanRef.current?.(text)
     return true
   }, [])
 
-  // ── Consensus logic ────────────────────────────────────────────────────
-  function acceptOcrCandidate(candidate, confidence, manual) {
-    if (!candidate || isGarbageToken(candidate)) return false
-
-    // Manual snapshot: accept immediately.
-    // Auto scan: require the same candidate on two consecutive passes before queueing.
-    const confirmed = manual || ocrConsensusRef.current.text === candidate
-
-    if (!confirmed) {
-      ocrConsensusRef.current = { text: candidate, count: 1 }
-      setScannerHint(`Verifying: ${candidate}…`)
-      return false
-    }
-
-    ocrConsensusRef.current = { text: null, count: 0 }
-    return emitDetected(candidate, 'ocr')
-  }
-
-  // ── Run one OCR pass (Snap / Auto) via Unified Engine ───────────────────
-  async function runOcr({ manual = false } = {}) {
+  // ── Run Idefics3 OCR Pass ───────────────────────────────────────────────
+  async function runIdeficsOcr({ manual = false } = {}) {
     if (ocrBusyRef.current) return false
     if (!videoRef.current || videoRef.current.readyState < 2) return false
+
+    const currentConfig = getIdeficsConfig()
+    if (!currentConfig.token && !currentConfig.endpoint.includes('localhost')) {
+      if (manual) {
+        setConfigDraft({ token: currentConfig.token, endpoint: currentConfig.endpoint })
+        setIsConfigOpen(true)
+        setScannerHint('Configure Hugging Face token for Idefics3')
+      }
+      return false
+    }
 
     ocrBusyRef.current = true
     if (mountedRef.current) setIsOcrRunning(true)
@@ -404,59 +224,39 @@ export default function ScannerView({ onScan }) {
     if (manual) {
       setShutterFlash(true)
       setTimeout(() => setShutterFlash(false), 220)
-      setScannerHint('Reading snapshot…')
+      setScannerHint('Analyzing with Idefics3 Vision AI…')
     }
 
     try {
-      const { canvas, dataUrl, sharpness } = buildOcrImage(videoRef.current)
+      const { dataUrl } = buildOcrImage(videoRef.current)
 
-      // Motion-blur guard: a smeared frame produces confident-but-wrong reads
-      const isBlurry = sharpness < MIN_SHARPNESS
-      if (isBlurry && !manual) {
-        ocrConsensusRef.current = { text: null, count: 0 }
-        if (mountedRef.current) setScannerHint('Hold camera steady on label…')
-        return false
-      }
-
-      // Execute on-device OCR through the unified engine (Apple Vision -> Google ML Kit -> TextDetector -> WASM)
-      const result = await recognizeText({
-        canvas,
-        dataUrl,
-        onProgress: (p) => {
-          if (!mountedRef.current) return
-          if (p?.percent !== null) {
-            setScannerHint(`Initializing OCR (${p.percent}%)…`)
-          }
-        },
-      })
-
-      const rawText = result?.text || ''
-      const confidence = Number(result?.confidence || 0)
-      const latencyMs = result?.latencyMs || 0
-      const engineName = result?.engine ? (OCR_ENGINE_LABELS[result.engine]?.name || result.engine) : ''
-      const candidate = chooseCandidate(rawText)
+      const result = await recognizeWithIdefics3({ dataUrl })
+      const rawText = result.rawText || ''
+      const candidate = chooseCandidate(rawText) || compactText(rawText)
 
       if (mountedRef.current) {
-        const blurNote = manual && isBlurry ? ' — blurry frame' : ''
         setLastRead(
-          candidate
-            ? `Read: "${candidate}" (${latencyMs}ms • ${engineName})${blurNote}`
-            : (rawText.trim() && !isGarbageToken(compactText(rawText)) ? `Seen: "${rawText.trim().slice(0, 15)}" (${latencyMs}ms)` : '')
+          candidate 
+            ? `Idefics3: "${candidate}" (${result.latencyMs}ms)`
+            : (rawText.trim() ? `Seen: "${rawText.slice(0, 18)}"` : '')
         )
       }
 
-      if (!candidate) {
+      if (!candidate || isGarbageToken(candidate)) {
         if (manual && mountedRef.current) {
-          setScannerHint('No clear model code found — align label & snap again')
+          setScannerHint('No clear model code identified — align label & snap again')
         }
         return false
       }
 
-      return acceptOcrCandidate(candidate, confidence, manual)
+      return emitDetected(candidate, 'idefics')
     } catch (err) {
-      console.error('[OCR] Error:', err)
-      if (mountedRef.current && manual) {
-        setScannerHint('Could not read — align label & tap again')
+      console.error('[Idefics3 OCR] Error:', err)
+      if (mountedRef.current) {
+        setScannerHint(err.message || 'Idefics3 vision call failed')
+        if (err.message.includes('API key')) {
+          setIsConfigOpen(true)
+        }
       }
       return false
     } finally {
@@ -466,7 +266,7 @@ export default function ScannerView({ onScan }) {
   }
 
   useEffect(() => {
-    runOcrRef.current = runOcr
+    runOcrRef.current = runIdeficsOcr
   })
 
   // ── Camera startup ──────────────────────────────────────────────────────
@@ -506,7 +306,6 @@ export default function ScannerView({ onScan }) {
           await videoRef.current.play()
         }
 
-        // Enable autofocus if supported on device
         try {
           const capabilities = typeof track.getCapabilities === 'function' ? track.getCapabilities() : {}
           setHasTorch(Boolean(capabilities?.torch))
@@ -514,13 +313,6 @@ export default function ScannerView({ onScan }) {
             await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] })
           }
         } catch {}
-
-        // Warm up universal WASM engine in background if it's the active engine
-        if (engineDetails.type === OCR_ENGINE_TYPES.UNIVERSAL_WASM) {
-          getUniversalWorker().catch((err) => {
-            console.warn('[OCR Engine] Warmup note:', err.message)
-          })
-        }
 
         // Set up native barcode detector if available
         if ('BarcodeDetector' in window) {
@@ -539,7 +331,7 @@ export default function ScannerView({ onScan }) {
         }
 
         setIsInitializing(false)
-        setScannerHint('Align white label in box')
+        setScannerHint('Align label in box & tap Snap')
       } catch (err) {
         if (!active) return
         console.error('[Camera] Start error:', err)
@@ -560,12 +352,10 @@ export default function ScannerView({ onScan }) {
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop())
       streamRef.current = null
       trackRef.current = null
-      ocrConsensusRef.current = { text: null, count: 0 }
-      terminateOcrWorker().catch(() => {})
     }
-  }, [facingMode, engineDetails.type])
+  }, [facingMode])
 
-  // ── Barcode detection loop (native browser API) ─────────────────────────
+  // ── Barcode detection loop (Hardware QR/1D barcode) ─────────────────────
   useEffect(() => {
     let active = true
     let busy = false
@@ -600,18 +390,22 @@ export default function ScannerView({ onScan }) {
     }
   }, [isInitializing, error, emitDetected])
 
-  // ── Auto OCR loop (silent background pass) ───────────────────────────────
+  // ── Auto OCR loop (if configured) ───────────────────────────────────────
   useEffect(() => {
     if (isInitializing || error) return undefined
     let active = true
 
     async function autoLoop() {
       if (!active) return
-      await runOcrRef.current?.()
+      // Auto run only if user has an active token configured
+      const cfg = getIdeficsConfig()
+      if (cfg.token) {
+        await runOcrRef.current?.()
+      }
       if (active) ocrTimerRef.current = setTimeout(autoLoop, OCR_INTERVAL_MS)
     }
 
-    ocrTimerRef.current = setTimeout(autoLoop, 1200)
+    ocrTimerRef.current = setTimeout(autoLoop, 2500)
 
     return () => {
       active = false
@@ -643,180 +437,311 @@ export default function ScannerView({ onScan }) {
     setTimeout(() => setFacingMode('environment'), 100)
   }
 
+  function handleSaveConfig(e) {
+    e.preventDefault()
+    saveIdeficsConfig(configDraft)
+    setHasHfToken(Boolean(configDraft.token))
+    setIsConfigOpen(false)
+    setScannerHint('Idefics3 token configured')
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.3 }}
-      className={`relative w-full bg-slate-950 rounded-2xl sm:rounded-3xl overflow-hidden shadow-xl shadow-slate-900/10 border border-slate-800 mb-4 transition-all duration-300 ${
-        isMinimized ? 'h-15' : 'h-48 sm:h-56'
-      }`}
-    >
-      <video
-        ref={videoRef}
-        className={`w-full h-full object-cover block transition-opacity duration-200 ${isMinimized ? 'opacity-25' : 'opacity-100'}`}
-        muted
-        playsInline
-        autoPlay
-      />
+    <>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3 }}
+        className={`relative w-full bg-slate-950 rounded-2xl sm:rounded-3xl overflow-hidden shadow-xl shadow-slate-900/10 border border-slate-800 mb-4 transition-all duration-300 ${
+          isMinimized ? 'h-15' : 'h-48 sm:h-56'
+        }`}
+      >
+        <video
+          ref={videoRef}
+          className={`w-full h-full object-cover block transition-opacity duration-200 ${isMinimized ? 'opacity-25' : 'opacity-100'}`}
+          muted
+          playsInline
+          autoPlay
+        />
 
-      {/* Snapshot Shutter Flash Effect */}
-      <AnimatePresence>
-        {shutterFlash && !isMinimized && (
-          <motion.div
-            initial={{ opacity: 0.85 }}
-            animate={{ opacity: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="absolute inset-0 bg-white pointer-events-none z-30"
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Compact Scan Reticle Overlay (Only when expanded) */}
-      {!isMinimized && (
-        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-          <div className="relative w-48 h-24 sm:w-56 sm:h-28 rounded-xl ring-[4000px] ring-black/50">
-            <div className="absolute top-0 left-0 w-5 h-5 border-t-2 border-l-2 border-sky-400 rounded-tl-lg" />
-            <div className="absolute top-0 right-0 w-5 h-5 border-t-2 border-r-2 border-sky-400 rounded-tr-lg" />
-            <div className="absolute bottom-0 left-0 w-5 h-5 border-b-2 border-l-2 border-sky-400 rounded-bl-lg" />
-            <div className="absolute bottom-0 right-0 w-5 h-5 border-b-2 border-r-2 border-sky-400 rounded-br-lg" />
+        {/* Snapshot Shutter Flash Effect */}
+        <AnimatePresence>
+          {shutterFlash && !isMinimized && (
             <motion.div
-              animate={{ top: ['8%', '88%', '8%'], opacity: [0.25, 0.9, 0.25] }}
-              transition={{ duration: 2.0, repeat: Infinity, ease: 'easeInOut' }}
-              className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent shadow-[0_0_10px_#38bdf8]"
+              initial={{ opacity: 0.85 }}
+              animate={{ opacity: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="absolute inset-0 bg-white pointer-events-none z-30"
             />
-          </div>
-        </div>
-      )}
-
-      {/* Top / Main Controls Bar */}
-      <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between z-10 pointer-events-auto">
-        <div className="flex items-center gap-1.5 max-w-[65%] sm:max-w-[70%]">
-          <div className="bg-slate-900/85 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10 text-white text-[11px] font-medium flex items-center gap-1.5 shadow-md truncate">
-            <span className={`w-2 h-2 rounded-full shrink-0 ${isOcrRunning ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-            <span className="truncate">{lastRead || scannerHint}</span>
-          </div>
-
-          {/* Active Engine Badge */}
-          <div className="hidden xs:flex bg-slate-900/80 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/10 text-[10px] text-slate-300 items-center gap-1 shadow-sm shrink-0">
-            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" />
-            <span className="font-semibold text-white">{engineDetails.badge}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          {/* Quick Snap button in minimized mode */}
-          {isMinimized && (
-            <button
-              type="button"
-              onClick={() => runOcr({ manual: true })}
-              disabled={isOcrRunning || isInitializing || Boolean(error)}
-              title="Snap & Read"
-              className="h-8 px-2.5 rounded-full bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 shadow-md disabled:opacity-50"
-            >
-              {isOcrRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-              <span>Snap</span>
-            </button>
           )}
+        </AnimatePresence>
 
-          {hasTorch && !isMinimized && (
+        {/* Scan Reticle Overlay */}
+        {!isMinimized && (
+          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+            <div className="relative w-48 h-24 sm:w-56 sm:h-28 rounded-xl ring-[4000px] ring-black/50">
+              <div className="absolute top-0 left-0 w-5 h-5 border-t-2 border-l-2 border-indigo-400 rounded-tl-lg" />
+              <div className="absolute top-0 right-0 w-5 h-5 border-t-2 border-r-2 border-indigo-400 rounded-tr-lg" />
+              <div className="absolute bottom-0 left-0 w-5 h-5 border-b-2 border-l-2 border-indigo-400 rounded-bl-lg" />
+              <div className="absolute bottom-0 right-0 w-5 h-5 border-b-2 border-r-2 border-indigo-400 rounded-br-xl" />
+              <motion.div
+                animate={{ top: ['8%', '88%', '8%'], opacity: [0.25, 0.9, 0.25] }}
+                transition={{ duration: 2.0, repeat: Infinity, ease: 'easeInOut' }}
+                className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-indigo-400 to-transparent shadow-[0_0_10px_#818cf8]"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Top Controls Bar */}
+        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between z-10 pointer-events-auto">
+          <div className="flex items-center gap-1.5 max-w-[65%] sm:max-w-[70%]">
+            <div className="bg-slate-900/85 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10 text-white text-[11px] font-medium flex items-center gap-1.5 shadow-md truncate">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${isOcrRunning ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+              <span className="truncate">{lastRead || scannerHint}</span>
+            </div>
+
+            {/* Idefics3 Engine Badge */}
             <button
               type="button"
-              onClick={toggleTorch}
-              title={torchOn ? 'Turn Flash Off' : 'Turn Flash On'}
-              className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${
-                torchOn
-                  ? 'bg-amber-500 text-white border-amber-400 shadow-lg shadow-amber-500/30'
-                  : 'bg-slate-900/70 text-slate-200 border-white/20 hover:bg-slate-800/80 active:scale-95'
-              }`}
+              onClick={() => {
+                const cfg = getIdeficsConfig()
+                setConfigDraft({ token: cfg.token, endpoint: cfg.endpoint })
+                setIsConfigOpen(true)
+              }}
+              title="Click to configure Idefics3 token or endpoint"
+              className="hidden xs:flex bg-indigo-950/80 hover:bg-indigo-900/80 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-indigo-500/30 text-[10px] text-indigo-300 items-center gap-1 shadow-sm shrink-0 transition-all cursor-pointer active:scale-95"
             >
-              {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
+              <Sparkles className="w-3 h-3 text-indigo-400" />
+              <span className="font-semibold text-white">Idefics3 OCR</span>
+              {!hasHfToken && <span className="text-[9px] text-amber-400 font-bold ml-0.5">Setup</span>}
             </button>
-          )}
+          </div>
 
-          {!isMinimized && (
+          <div className="flex items-center gap-1.5">
+            {/* Quick Snap button in minimized mode */}
+            {isMinimized && (
+              <button
+                type="button"
+                onClick={() => runIdeficsOcr({ manual: true })}
+                disabled={isOcrRunning || isInitializing || Boolean(error)}
+                title="Snap with Idefics3"
+                className="h-8 px-2.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 shadow-md disabled:opacity-50"
+              >
+                {isOcrRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                <span>Snap</span>
+              </button>
+            )}
+
+            {/* Config Token Button */}
             <button
               type="button"
-              onClick={flipCamera}
-              title="Switch Camera"
+              onClick={() => {
+                const cfg = getIdeficsConfig()
+                setConfigDraft({ token: cfg.token, endpoint: cfg.endpoint })
+                setIsConfigOpen(true)
+              }}
+              title="Configure Idefics3 API Key"
               className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-slate-900/70 text-slate-200 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 active:scale-95 transition-all shadow-md"
             >
-              <RefreshCw className="w-4 h-4" />
+              <Key className="w-4 h-4 text-indigo-300" />
             </button>
-          )}
 
-          {/* Minimize / Maximize Viewport Toggle */}
-          <button
-            type="button"
-            onClick={() => setIsMinimized((prev) => !prev)}
-            title={isMinimized ? 'Expand Camera View' : 'Minimize Camera View'}
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-slate-900/80 text-sky-400 backdrop-blur-md border border-sky-400/30 hover:bg-slate-800 active:scale-95 transition-all shadow-md"
-          >
-            {isMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Snap & Read Button (When expanded) */}
-      {!isMinimized && (
-        <div className="absolute bottom-2.5 left-0 right-0 flex justify-center items-center pointer-events-auto z-10 px-4">
-          <button
-            type="button"
-            onClick={() => runOcr({ manual: true })}
-            disabled={isOcrRunning || isInitializing || Boolean(error)}
-            title="Take sharp on-device snapshot & read text immediately"
-            className="px-4 py-2 rounded-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-xl shadow-sky-950/50 border border-sky-300/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isOcrRunning ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Analyzing…</span>
-              </>
-            ) : (
-              <>
-                <Camera className="w-3.5 h-3.5" />
-                <span>Snap & Read</span>
-              </>
+            {hasTorch && !isMinimized && (
+              <button
+                type="button"
+                onClick={toggleTorch}
+                title={torchOn ? 'Turn Flash Off' : 'Turn Flash On'}
+                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${
+                  torchOn
+                    ? 'bg-amber-500 text-white border-amber-400 shadow-lg shadow-amber-500/30'
+                    : 'bg-slate-900/70 text-slate-200 border-white/20 hover:bg-slate-800/80 active:scale-95'
+                }`}
+              >
+                {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
+              </button>
             )}
-          </button>
-        </div>
-      )}
 
-      {/* Initializing overlay */}
-      {isInitializing && !error && (
-        <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center p-4 text-center z-20">
-          <div className="w-8 h-8 border-2 border-slate-700 border-t-sky-400 rounded-full animate-spin mb-2" />
-          <p className="text-slate-300 text-xs font-medium">Starting camera…</p>
-        </div>
-      )}
+            {!isMinimized && (
+              <button
+                type="button"
+                onClick={flipCamera}
+                title="Switch Camera"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-slate-900/70 text-slate-200 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 active:scale-95 transition-all shadow-md"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
 
-      {/* Error overlay */}
+            {/* Minimize / Maximize Viewport Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsMinimized((prev) => !prev)}
+              title={isMinimized ? 'Expand Camera View' : 'Minimize Camera View'}
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-slate-900/80 text-indigo-300 backdrop-blur-md border border-indigo-400/30 hover:bg-slate-800 active:scale-95 transition-all shadow-md"
+            >
+              {isMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Snap & Read Button (When expanded) */}
+        {!isMinimized && (
+          <div className="absolute bottom-2.5 left-0 right-0 flex justify-center items-center pointer-events-auto z-10 px-4">
+            <button
+              type="button"
+              onClick={() => runIdeficsOcr({ manual: true })}
+              disabled={isOcrRunning || isInitializing || Boolean(error)}
+              title="Analyze label with Idefics3 Vision Model"
+              className="px-4 py-2 rounded-full bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-xl shadow-indigo-950/50 border border-indigo-300/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isOcrRunning ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Idefics3 Reading…</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
+                  <span>Snap with Idefics3</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Initializing overlay */}
+        {isInitializing && !error && (
+          <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center p-4 text-center z-20">
+            <div className="w-8 h-8 border-2 border-slate-700 border-t-indigo-400 rounded-full animate-spin mb-2" />
+            <p className="text-slate-300 text-xs font-medium">Starting camera…</p>
+          </div>
+        )}
+
+        {/* Error overlay */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center z-30"
+            >
+              <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mb-2">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <h4 className="text-rose-400 font-semibold text-sm mb-1">Camera Unavailable</h4>
+              <p className="text-slate-400 text-[11px] max-w-xs mb-3">{error}</p>
+              <button
+                type="button"
+                onClick={retryCamera}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-xl border border-slate-700 active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                <Camera className="w-3 h-3" />
+                Retry Camera
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+
+      {/* Idefics3 API Settings Modal */}
       <AnimatePresence>
-        {error && (
+        {isConfigOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center z-30"
+            className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4"
           >
-            <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mb-2">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-            <h4 className="text-rose-400 font-semibold text-sm mb-1">Camera Unavailable</h4>
-            <p className="text-slate-400 text-[11px] max-w-xs mb-3">{error}</p>
-            <button
-              type="button"
-              onClick={retryCamera}
-              className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-xl border border-slate-700 active:scale-95 transition-all flex items-center gap-1.5"
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              className="bg-white rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl border border-slate-200"
             >
-              <Camera className="w-3 h-3" />
-              Retry Camera
-            </button>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles className="w-4 h-4 text-indigo-600" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">Idefics3 OCR Setup</span>
+                  </div>
+                  <h3 className="text-xl font-black text-slate-900">Hugging Face Idefics3</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Powered by <span className="font-mono font-bold text-slate-700">{ideficsConfig.model}</span> for state-of-the-art visual label OCR.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsConfigOpen(false)}
+                  className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-xl"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveConfig} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Hugging Face Access Token (free)
+                  </label>
+                  <input
+                    type="password"
+                    value={configDraft.token}
+                    onChange={(e) => setConfigDraft({ ...configDraft, token: e.target.value })}
+                    placeholder="hf_..."
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Get your free token from{' '}
+                    <a
+                      href="https://huggingface.co/settings/tokens"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-600 hover:underline font-medium"
+                    >
+                      huggingface.co/settings/tokens
+                    </a>
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Custom Endpoint (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={configDraft.endpoint}
+                    onChange={(e) => setConfigDraft({ ...configDraft, endpoint: e.target.value })}
+                    placeholder={ideficsConfig.endpoint}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Leave blank to use default Hugging Face Serverless Inference Router.
+                  </p>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    <Check className="w-4 h-4" /> Save Configuration
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsConfigOpen(false)}
+                    className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </>
   )
 }
