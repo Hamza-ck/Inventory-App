@@ -194,7 +194,7 @@ async function recognizeWithAppleVision({ dataUrl, canvas }) {
  * Google ML Kit Text Recognition v2 Adapter
  * Executes native on-device ML Kit v2 on Android hardware.
  */
-async function recognizeWithGoogleMLKit({ dataUrl, canvas }) {
+async function recognizeWithGoogleMLKit({ dataUrl }) {
   // Option A: @capacitor-mlkit/text-recognition
   const mlKitPlugin = window.Capacitor?.Plugins?.TextRecognition || window.Capacitor?.Plugins?.MLKitTextRecognition
   if (mlKitPlugin?.processImage) {
