@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, ScanText } from 'lucide-react'
+import { Zap, ZapOff, RefreshCw, AlertCircle, Camera, ScanText, Loader2 } from 'lucide-react'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 const OCR_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
-const OCR_INTERVAL_MS = 2200      // ms between auto OCR reads
-const DUPLICATE_COOLDOWN_MS = 5000 // suppress re-emitting the same code
-const OCR_CONSENSUS_NEEDED = 2     // require N consecutive matching reads
+const OCR_INTERVAL_MS = 1800       // ms between auto OCR reads
+const DUPLICATE_COOLDOWN_MS = 4000 // suppress re-emitting the same code
+const OCR_CONSENSUS_NEEDED = 2     // require N consecutive reads if confidence < 45
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -30,31 +30,55 @@ function isUsefulToken(value) {
 
 /**
  * Extract the best model-like candidate from raw OCR text.
- * Prefers tokens that are 3-6 characters (typical model codes like V22, F31).
+ * Robust to whitespace inserted by plastic glare (e.g. "G 64" -> "G64").
  */
 function chooseCandidate(rawText) {
   if (!rawText) return null
-  const source = normalizeText(rawText)
+  const source = normalizeText(rawText).toUpperCase()
 
-  // Split on any separator
-  const pieces = source
-    .split(/[\n|,;:/\\()\[\]{}<>]+/)
-    .flatMap((line) => line.split(/\s+/))
+  const lines = source.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean)
+  const candidates = []
+
+  // Check whole lines compacted (e.g. "G 64" -> "G64", "V 22" -> "V22")
+  for (const line of lines) {
+    const compacted = compactText(line)
+    if (isUsefulToken(compacted)) {
+      candidates.push(compacted)
+    }
+  }
+
+  // Split into tokens by common separators
+  const words = source
+    .split(/[\s,;|/:_\\()[\]{}<>-]+/)
     .map(compactText)
-    .filter(isUsefulToken)
+    .filter(Boolean)
 
-  const candidates = [...new Set(pieces)]
-  if (candidates.length === 0) return null
+  for (const word of words) {
+    if (isUsefulToken(word)) {
+      candidates.push(word)
+    }
+  }
+
+  // Check adjacent word pairs (e.g. "G" + "64" -> "G64", "NOTE" + "10" -> "NOTE10")
+  for (let i = 0; i < words.length - 1; i++) {
+    const pair = words[i] + words[i + 1]
+    if (isUsefulToken(pair)) {
+      candidates.push(pair)
+    }
+  }
+
+  const unique = [...new Set(candidates)]
+  if (unique.length === 0) return null
 
   // Score: prefer 3-6 char tokens (V22, F31, G64, A6PRO), penalize very long ones
-  candidates.sort((a, b) => {
+  unique.sort((a, b) => {
     const idealLen = 4
-    const aScore = Math.abs(a.length - idealLen) + (a.length > 10 ? 5 : 0)
-    const bScore = Math.abs(b.length - idealLen) + (b.length > 10 ? 5 : 0)
+    const aScore = Math.abs(a.length - idealLen) + (a.length > 8 ? 4 : 0)
+    const bScore = Math.abs(b.length - idealLen) + (b.length > 8 ? 4 : 0)
     return aScore - bScore
   })
 
-  return candidates[0]
+  return unique[0]
 }
 
 /**
@@ -70,7 +94,6 @@ function makeFingerprint(video) {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
   let hash = 0
-  // Sample every 8th byte for more sensitivity to frame changes
   for (let i = 0; i < data.length; i += 8) {
     hash = (hash * 31 + data[i]) | 0
   }
@@ -78,68 +101,103 @@ function makeFingerprint(video) {
 }
 
 /**
- * Crop and preprocess the center of the video for OCR.
- * - Crops the scan window area (center region)
- * - Scales up 3x for better Tesseract accuracy
- * - Converts to high-contrast grayscale
+ * Timeout wrapper for promises to prevent infinite stalls on network or worker hangs.
  */
-function buildOcrImage(video, mode = 'normal') {
+function withTimeout(promise, ms, message) {
+  let timer = null
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message || `Timeout after ${ms}ms`)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+/**
+ * Crop and preprocess the center scan window area for fast, accurate OCR.
+ * - Targets the exact reticle region
+ * - Clamps max width to 560px (under 0.2 megapixels for instant 100ms recognition)
+ * - Enhances contrast to sharpen text and filter plastic glare
+ */
+function buildOcrImage(video) {
   const width = video.videoWidth || 1280
   const height = video.videoHeight || 720
 
-  // Crop a wide center region to capture the label
-  const cropWidth = Math.floor(width * 0.78)
-  const cropHeight = Math.floor(height * 0.36)
+  // The reticle box is in the center of the video feed.
+  // Crop a region matching the center scan box with modest padding
+  const cropWidth = Math.floor(width * 0.52)
+  const cropHeight = Math.floor(height * 0.42)
   const sx = Math.floor((width - cropWidth) / 2)
   const sy = Math.floor((height - cropHeight) / 2)
-  const scale = 3
+
+  // Clamp target resolution for OCR (optimal font height for Tesseract LSTM)
+  const targetWidth = Math.min(560, cropWidth)
+  const scale = targetWidth / cropWidth
+  const targetHeight = Math.round(cropHeight * scale)
 
   const canvas = document.createElement('canvas')
-  canvas.width = cropWidth * scale
-  canvas.height = cropHeight * scale
+  canvas.width = targetWidth
+  canvas.height = targetHeight
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (!ctx) throw new Error('Canvas context unavailable')
 
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height)
+  ctx.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight)
 
-  // Apply contrast enhancement
-  const image = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  // Grayscale & contrast enhancement
+  const image = ctx.getImageData(0, 0, targetWidth, targetHeight)
   const d = image.data
 
-  for (let i = 0; i < d.length; i += 4) {
-    // Convert to grayscale using luminance formula
-    const gray = Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114)
+  let minLum = 255
+  let maxLum = 0
+  const lums = new Uint8Array(d.length / 4)
 
-    let value
-    if (mode === 'threshold') {
-      // Hard black/white threshold for high contrast labels
-      value = gray > 140 ? 255 : 0
-    } else if (mode === 'adaptive') {
-      // Stretched contrast: push midtones toward extremes
-      value = gray < 80 ? 0 : gray > 180 ? 255 : Math.round(((gray - 80) / 100) * 255)
-    } else {
-      value = gray
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    const lum = Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114)
+    lums[j] = lum
+    if (lum < minLum) minLum = lum
+    if (lum > maxLum) maxLum = lum
+  }
+
+  const range = maxLum - minLum
+  const canStretch = range > 35
+
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    let val = lums[j]
+    if (canStretch) {
+      val = Math.round(((val - minLum) / range) * 255)
+    }
+    // Boost dark text and suppress midtone plastic reflections
+    if (val < 100) {
+      val = Math.max(0, Math.round(val * 0.55))
+    } else if (val > 150) {
+      val = Math.min(255, Math.round(val * 1.15))
     }
 
-    d[i] = value
-    d[i + 1] = value
-    d[i + 2] = value
+    d[i] = val
+    d[i + 1] = val
+    d[i + 2] = val
     d[i + 3] = 255
   }
+
   ctx.putImageData(image, 0, 0)
   return canvas
 }
 
-// ─── Tesseract Loader ─────────────────────────────────────────────────────────
+// ─── Tesseract Loader & Fast Model Path ───────────────────────────────────────
+
+const FAST_LANG_PATH = 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast'
+
+function getLangPath() {
+  return FAST_LANG_PATH
+}
 
 let tesseractLoadPromise = null
 
 async function loadTesseract() {
   if (typeof window === 'undefined') return null
   if (window.Tesseract) return window.Tesseract
-
   if (tesseractLoadPromise) return tesseractLoadPromise
 
   tesseractLoadPromise = new Promise((resolve, reject) => {
@@ -182,11 +240,13 @@ export default function ScannerView({ onScan }) {
   const onScanRef = useRef(onScan)
   const ocrBusyRef = useRef(false)
   const ocrWorkerRef = useRef(null)
+  const workerInitPromiseRef = useRef(null)
   const ocrConsensusRef = useRef({ text: null, count: 0 })
   const lastCodeRef = useRef({ text: null, at: 0 })
   const lastOcrFingerprintRef = useRef(null)
   const barcodeFrameRef = useRef(null)
   const ocrTimerRef = useRef(null)
+  const runOcrRef = useRef(null)
   const mountedRef = useRef(true)
 
   const [error, setError] = useState(null)
@@ -195,11 +255,14 @@ export default function ScannerView({ onScan }) {
   const [facingMode, setFacingMode] = useState('environment')
   const [isInitializing, setIsInitializing] = useState(true)
   const [isOcrRunning, setIsOcrRunning] = useState(false)
-  const [ocrReady, setOcrReady] = useState(false)
+  const [, setOcrReady] = useState(false)
   const [scannerHint, setScannerHint] = useState('Starting camera…')
 
   useEffect(() => { onScanRef.current = onScan }, [onScan])
-  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   // ── Emit a detected code ────────────────────────────────────────────────
   const emitDetected = useCallback((value, source) => {
@@ -210,7 +273,7 @@ export default function ScannerView({ onScan }) {
 
     lastCodeRef.current = { text, at: now }
     setScannerHint(source === 'ocr' ? `✓ Read label: ${text}` : `✓ Scanned code: ${text}`)
-    try { if (navigator.vibrate) navigator.vibrate(35) } catch {}
+    try { if (navigator.vibrate) navigator.vibrate(40) } catch {}
     onScanRef.current?.(text)
     return true
   }, [])
@@ -218,29 +281,53 @@ export default function ScannerView({ onScan }) {
   // ── Create / reuse the Tesseract worker ─────────────────────────────────
   async function getOcrWorker(tesseract) {
     if (ocrWorkerRef.current) return ocrWorkerRef.current
+    if (workerInitPromiseRef.current) return workerInitPromiseRef.current
 
-    try {
-      // Tesseract.js v5 API: createWorker(langs, oem, options)
-      const worker = await tesseract.createWorker('eng', 1, {
-        logger: () => {},
-      })
+    workerInitPromiseRef.current = (async () => {
+      try {
+        const langPath = await getLangPath()
+        if (mountedRef.current) setScannerHint('Loading OCR engine…')
 
-      // Configure for single-word recognition of short model codes
-      await worker.setParameters({
-        tessedit_pageseg_mode: '7', // Treat image as a single text line
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
-      })
+        const createPromise = tesseract.createWorker('eng', 1, {
+          langPath,
+          gzip: true,
+          logger: (m) => {
+            if (!mountedRef.current) return
+            if (m?.status) {
+              const pct = typeof m.progress === 'number' ? Math.round(m.progress * 100) : null
+              if (m.status.includes('loading') || m.status.includes('downloading')) {
+                setScannerHint(pct !== null ? `Loading OCR model (${pct}%)…` : 'Loading OCR model…')
+              } else if (m.status.includes('init')) {
+                setScannerHint('Initializing OCR…')
+              }
+            }
+          },
+        })
 
-      ocrWorkerRef.current = worker
-      if (mountedRef.current) setOcrReady(true)
-      return worker
-    } catch (err) {
-      console.error('[OCR] Worker creation failed:', err)
-      throw err
-    }
+        const worker = await withTimeout(createPromise, 15000, 'OCR engine setup timed out')
+
+        await worker.setParameters({
+          tessedit_pageseg_mode: '6', // Assume a single uniform block of text
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/',
+        })
+
+        ocrWorkerRef.current = worker
+        if (mountedRef.current) {
+          setOcrReady(true)
+          setScannerHint('Point at the printed model label')
+        }
+        return worker
+      } catch (err) {
+        console.error('[OCR] Worker creation failed:', err)
+        workerInitPromiseRef.current = null
+        throw err
+      }
+    })()
+
+    return workerInitPromiseRef.current
   }
 
-  // ── Consensus logic: require N consecutive matching reads ───────────────
+  // ── Consensus logic ────────────────────────────────────────────────────
   function acceptOcrCandidate(candidate, confidence, manual) {
     if (!candidate) return false
 
@@ -251,9 +338,11 @@ export default function ScannerView({ onScan }) {
       ocrConsensusRef.current = { text: candidate, count: 1 }
     }
 
-    // Fast path for manual reads or high-confidence results.
-    // Otherwise require N consecutive matching reads to filter OCR noise.
-    const confirmed = manual || confidence >= 75 || ocrConsensusRef.current.count >= OCR_CONSENSUS_NEEDED
+    // Manual reads: accept immediately if confidence is at least 20
+    // Auto reads: accept immediately if confidence >= 45 (or 2 consecutive reads if lower)
+    const confirmed = manual
+      ? confidence >= 20
+      : confidence >= 45 || ocrConsensusRef.current.count >= OCR_CONSENSUS_NEEDED
 
     if (!confirmed) {
       setScannerHint(`Verifying: ${candidate}…`)
@@ -278,45 +367,26 @@ export default function ScannerView({ onScan }) {
     if (manual) setScannerHint('Reading label…')
 
     try {
-      const tesseract = await loadTesseract()
+      const tesseract = await withTimeout(loadTesseract(), 8000, 'OCR engine load timed out')
       if (!tesseract) throw new Error('OCR engine not available')
 
       const worker = await getOcrWorker(tesseract)
+      if (!worker) throw new Error('OCR worker unavailable')
 
-      // Pass 1: normal grayscale
-      const normalImage = buildOcrImage(videoRef.current, 'normal')
-      let result = await worker.recognize(normalImage)
-      let candidate = chooseCandidate(result?.data?.text)
-      let confidence = Number(result?.data?.confidence || 0)
+      const image = buildOcrImage(videoRef.current)
+      const recognizePromise = worker.recognize(image)
+      const result = await withTimeout(recognizePromise, 4000, 'OCR recognition timed out')
 
-      // Pass 2: adaptive contrast if pass 1 was weak
-      if (!candidate || confidence < 55) {
-        const adaptiveImage = buildOcrImage(videoRef.current, 'adaptive')
-        result = await worker.recognize(adaptiveImage)
-        const c2 = chooseCandidate(result?.data?.text)
-        const conf2 = Number(result?.data?.confidence || 0)
-        if (c2 && conf2 > confidence) {
-          candidate = c2
-          confidence = conf2
-        }
-      }
-
-      // Pass 3: hard threshold if still weak
-      if (!candidate || confidence < 50) {
-        const threshImage = buildOcrImage(videoRef.current, 'threshold')
-        result = await worker.recognize(threshImage)
-        const c3 = chooseCandidate(result?.data?.text)
-        const conf3 = Number(result?.data?.confidence || 0)
-        if (c3 && conf3 > (confidence || 0)) {
-          candidate = c3
-          confidence = conf3
-        }
-      }
+      const rawText = result?.data?.text || ''
+      const confidence = Number(result?.data?.confidence || 0)
+      const candidate = chooseCandidate(rawText)
 
       lastOcrFingerprintRef.current = makeFingerprint(videoRef.current) ?? fingerprint
 
-      if (!candidate || confidence < 35) {
-        if (manual) setScannerHint('Could not read label — move closer and hold steady')
+      if (!candidate) {
+        if (manual && mountedRef.current) {
+          setScannerHint('Could not read label — hold steady & align in box')
+        }
         return false
       }
 
@@ -324,9 +394,7 @@ export default function ScannerView({ onScan }) {
     } catch (err) {
       console.error('[OCR] Error:', err)
       if (manual && mountedRef.current) {
-        setScannerHint(err?.message?.includes('CDN') || err?.message?.includes('load')
-          ? 'OCR engine failed to load — check internet connection'
-          : 'OCR failed. Try better lighting or hold camera steady.')
+        setScannerHint('Could not read — try better lighting or hold steady')
       }
       return false
     } finally {
@@ -334,6 +402,10 @@ export default function ScannerView({ onScan }) {
       if (mountedRef.current) setIsOcrRunning(false)
     }
   }
+
+  useEffect(() => {
+    runOcrRef.current = runOcr
+  })
 
   // ── Camera startup ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -373,17 +445,27 @@ export default function ScannerView({ onScan }) {
           await videoRef.current.play()
         }
 
-        const capabilities = typeof track.getCapabilities === 'function' ? track.getCapabilities() : {}
-        setHasTorch(Boolean(capabilities?.torch))
+        // Enable autofocus if supported on device
+        try {
+          const capabilities = typeof track.getCapabilities === 'function' ? track.getCapabilities() : {}
+          setHasTorch(Boolean(capabilities?.torch))
+          if (capabilities?.focusMode && Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
+            await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] })
+          }
+        } catch {}
 
-        // Pre-load Tesseract in background (don't block camera)
-        loadTesseract().then(() => {
-          if (active) setScannerHint('Ready — point at label')
-        }).catch((err) => {
-          console.warn('[OCR] Pre-load failed:', err.message)
-        })
+        // Pre-load Tesseract in background
+        loadTesseract()
+          .then((tess) => {
+            if (active && tess) {
+              getOcrWorker(tess).catch(() => {})
+            }
+          })
+          .catch((err) => {
+            console.warn('[OCR] Pre-load failed:', err.message)
+          })
 
-        // Set up barcode detector if available
+        // Set up native barcode detector if available
         if ('BarcodeDetector' in window) {
           try {
             const supported = typeof window.BarcodeDetector.getSupportedFormats === 'function'
@@ -424,6 +506,7 @@ export default function ScannerView({ onScan }) {
       ocrConsensusRef.current = { text: null, count: 0 }
       const worker = ocrWorkerRef.current
       ocrWorkerRef.current = null
+      workerInitPromiseRef.current = null
       if (worker?.terminate) worker.terminate().catch(() => {})
     }
   }, [facingMode])
@@ -470,12 +553,12 @@ export default function ScannerView({ onScan }) {
 
     async function autoLoop() {
       if (!active) return
-      await runOcr()
+      await runOcrRef.current?.()
       if (active) ocrTimerRef.current = setTimeout(autoLoop, OCR_INTERVAL_MS)
     }
 
-    // Delay first OCR run to let camera stabilize
-    ocrTimerRef.current = setTimeout(autoLoop, 1500)
+    // Delay first auto-OCR run to let camera focus stabilize
+    ocrTimerRef.current = setTimeout(autoLoop, 1200)
 
     return () => {
       active = false
@@ -545,8 +628,17 @@ export default function ScannerView({ onScan }) {
           title="Read printed model text now"
           className="h-10 px-3 rounded-full flex items-center justify-center gap-1.5 bg-slate-900/70 text-slate-100 backdrop-blur-md border border-white/20 hover:bg-slate-800/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md text-xs font-semibold"
         >
-          <ScanText className="w-4 h-4" />
-          {isOcrRunning ? 'Reading…' : 'Read now'}
+          {isOcrRunning ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+              <span>Reading…</span>
+            </>
+          ) : (
+            <>
+              <ScanText className="w-4 h-4" />
+              <span>Read now</span>
+            </>
+          )}
         </button>
 
         <div className="flex items-center gap-2">
