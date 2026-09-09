@@ -22,6 +22,77 @@ export function normalizeLabel(value) {
 }
 
 /**
+ * Standard edit distance (single-row DP, O(n) memory).
+ */
+export function levenshtein(a, b) {
+  a = String(a || '')
+  b = String(b || '')
+  const m = a.length
+  const n = b.length
+  if (m === 0) return n
+  if (n === 0) return m
+
+  let prev = new Array(n + 1)
+  let curr = new Array(n + 1)
+  for (let j = 0; j <= n; j++) prev[j] = j
+
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(
+        prev[j] + 1,       // deletion
+        curr[j - 1] + 1,   // insertion
+        prev[j - 1] + cost // substitution
+      )
+    }
+    ;[prev, curr] = [curr, prev]
+  }
+  return prev[n]
+}
+
+// Short codes only tolerate 1 confused character; longer strings a couple more.
+// A single-character OCR slip (G/E, 6/A, 4/7, O/0, S/5) is the overwhelmingly
+// common failure mode on a short sticker code, which is exactly what this covers.
+function maxEditDistance(len) {
+  if (len <= 4) return 1
+  if (len <= 8) return 2
+  return 3
+}
+
+/**
+ * Find the closest known label to `candidate` among `knownKeys` (already-normalized
+ * strings). Returns { key, distance } or null if nothing is close enough, or if two
+ * different known labels are equally close (too risky to silently pick one).
+ */
+export function fuzzyFindClosest(candidate, knownKeys) {
+  const target = normalizeLabel(candidate)
+  if (!target || !knownKeys?.length) return null
+
+  let best = null
+  let bestDist = Infinity
+  let ambiguous = false
+
+  for (const key of knownKeys) {
+    if (!key || key === target) continue // exact matches are handled elsewhere, before this runs
+    const dist = levenshtein(target, key)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = key
+      ambiguous = false
+    } else if (dist === bestDist && key !== best) {
+      ambiguous = true
+    }
+  }
+
+  if (!best) return null
+  if (bestDist > maxEditDistance(target.length)) return null
+  if (ambiguous) return null
+
+  return { key: best, distance: bestDist }
+}
+
+/**
  * Resolve a scanned supplier label to its canonical model and optional direct material.
  * Returns { rawLabel, labelCode, canonicalModel, materialId, materialSku } or null.
  */

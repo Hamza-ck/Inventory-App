@@ -21,7 +21,7 @@ import { supabase } from '../lib/supabaseClient'
 import { db, addToQueue, updateQueueQty } from '../lib/db'
 import { submitQueue } from '../lib/sync'
 import { advancedFilterMaterials } from '../lib/searchUtils'
-import { filterMaterialsByCanonicalModel, resolveModelAlias, resolveSupplierModelLabel, saveModelAlias, saveSupplierModelLabel, updateSupplierModelLabelMaterial } from '../lib/modelLabelResolver'
+import { filterMaterialsByCanonicalModel, resolveModelAlias, resolveSupplierModelLabel, saveModelAlias, saveSupplierModelLabel, updateSupplierModelLabelMaterial, fuzzyFindClosest, normalizeLabel } from '../lib/modelLabelResolver'
 import { generateSkuForModel } from '../lib/modelMatcher'
 import ScannerView from '../components/ScannerView'
 import QueueList from '../components/QueueList'
@@ -57,6 +57,9 @@ export default function ScanPage() {
 
   // Materials state for live advanced search
   const [materials, setMaterials] = useState([])
+  // Every known material SKU / supplier label / alias, cached client-side so a
+  // near-miss OCR/vision read can be corrected instantly with zero network calls.
+  const [labelVocabulary, setLabelVocabulary] = useState([])
 
   // Modal states for Advance Search and Product Report
   const [isAdvanceSearchOpen, setIsAdvanceSearchOpen] = useState(false)
@@ -77,11 +80,51 @@ export default function ScanPage() {
 
   useEffect(() => {
     loadMaterials()
+    loadLabelVocabulary()
   }, [])
 
   async function loadMaterials() {
     const { data } = await supabase.from('materials').select('*').order('name')
     if (data) setMaterials(data)
+  }
+
+  // Pulls every material SKU + taught supplier label + alias into one flat,
+  // pre-normalized list for local fuzzy matching. Cheap: a handful of short
+  // strings per row, no images, runs once per mount plus after teaching new ones.
+  async function loadLabelVocabulary() {
+    const [{ data: mats }, { data: labels }, { data: aliases }] = await Promise.all([
+      supabase.from('materials').select('sku'),
+      supabase.from('supplier_model_labels').select('label_code, canonical_model, material_id'),
+      supabase.from('model_aliases').select('alias, canonical_model'),
+    ])
+
+    const entries = []
+    ;(mats || []).forEach((m) => {
+      if (m.sku) entries.push({ normalized: normalizeLabel(m.sku), type: 'material', sku: m.sku })
+    })
+    ;(labels || []).forEach((l) => {
+      if (l.label_code) {
+        entries.push({
+          normalized: normalizeLabel(l.label_code),
+          type: 'supplier_label',
+          labelCode: l.label_code,
+          canonicalModel: l.canonical_model,
+          materialId: l.material_id || null,
+        })
+      }
+    })
+    ;(aliases || []).forEach((a) => {
+      if (a.alias) {
+        entries.push({
+          normalized: normalizeLabel(a.alias),
+          type: 'alias',
+          alias: a.alias,
+          canonicalModel: a.canonical_model,
+        })
+      }
+    })
+
+    setLabelVocabulary(entries)
   }
 
   // Close live suggestions on outside click
@@ -237,6 +280,35 @@ export default function ScanPage() {
       return
     }
 
+    // Nothing matched exactly — before giving up, check whether the scanned text
+    // is just a slightly-misread version of something we already know (e.g. a
+    // blurry "G64" coming back as "EA7"). This runs entirely against the local
+    // cache, so it costs nothing and doesn't depend on OCR being pixel-perfect.
+    const fuzzy = fuzzyFindClosest(sku, labelVocabulary.map((entry) => entry.normalized))
+    if (fuzzy) {
+      const entry = labelVocabulary.find((e) => e.normalized === fuzzy.key)
+      if (entry) {
+        const matchedLabel = entry.type === 'material' ? entry.sku : entry.type === 'alias' ? entry.alias : entry.labelCode
+        const correctionNote = `Read "${sku}" — closest known match "${matchedLabel}" used instead.`
+
+        if (entry.type === 'material') {
+          const directMatch = materials.find((m) => m.sku === entry.sku)
+          if (directMatch) {
+            await queueMaterial(directMatch, currentDirection, sku)
+            setStatusType('info')
+            setStatus(correctionNote)
+            return
+          }
+        } else if (entry.canonicalModel) {
+          const directMaterial = entry.materialId ? materials.find((m) => m.id === entry.materialId) : null
+          await resolveModelToMaterials(sku, entry.canonicalModel, currentDirection, directMaterial?.sku || null)
+          setStatusType('info')
+          setStatus(correctionNote)
+          return
+        }
+      }
+    }
+
     // Unknown supplier label: only the owner in inward mode may teach the mapping.
     if (ownerStatus && currentDirection === 'in') {
       setUnknownLabel(sku)
@@ -311,6 +383,7 @@ export default function ScanPage() {
     setMaterialCreator(null)
     setCreatingMaterial(false)
     await loadMaterials()
+    await loadLabelVocabulary()
     await queueMaterial(data, draft.direction, draft.rawLabel)
   }
 
@@ -331,6 +404,7 @@ export default function ScanPage() {
 
     // Also teach the normalized model alias so future manual terminology can resolve.
     await saveModelAlias(supabase, canonicalModel, canonicalModel)
+    await loadLabelVocabulary()
     setUnknownLabel(null)
     setSavingLabel(false)
     setStatusType('success')
@@ -381,6 +455,7 @@ export default function ScanPage() {
     setStatus(`✓ Registered "${quickAdd.name.trim()}" and added to queue`)
     setUnknownSku(null)
     loadMaterials()
+    loadLabelVocabulary()
   }
 
   async function handleSubmit() {
