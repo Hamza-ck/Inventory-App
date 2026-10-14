@@ -541,6 +541,25 @@ export async function deleteVoucher(id) {
 }
 
 /**
+ * Initialize a clean chart of accounts for a newly created real company.
+ * Unlike local demo mode, this never creates fake stock, parties, balances, or vouchers.
+ */
+export async function initCompanyDefaults() {
+  const db = getCurrentDatabase()
+  await db.transaction('rw', ...db.tables, async () => {
+    if (await db.ledgers.count() > 0) return
+    await accDb.ledgers.bulkAdd([
+      { name: 'Cash in Hand', group: 'Cash-in-hand', opening_balance: 0, current_balance: 0, is_system: true },
+      { name: 'Bank Accounts', group: 'Bank Accounts', opening_balance: 0, current_balance: 0, is_system: true },
+      { name: 'Sales Account', group: 'Sales Accounts', opening_balance: 0, current_balance: 0, is_system: true },
+      { name: 'Purchase Account', group: 'Purchase Accounts', opening_balance: 0, current_balance: 0, is_system: true },
+      { name: 'Indirect Expenses', group: 'Indirect Expenses', opening_balance: 0, current_balance: 0, is_system: true },
+      { name: 'Direct Expenses', group: 'Direct Expenses', opening_balance: 0, current_balance: 0, is_system: true },
+    ])
+  })
+}
+
+/**
  * Initialize Default Accounting Master Data (Tally Standard Chart of Accounts)
  */
 export async function initDefaultAccountingData() {
