@@ -157,18 +157,7 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {isAdmin && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleOpenVoucher(null)}
-                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-600/30 flex items-center gap-2 active:scale-95 transition-all"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>+ Post New Voucher</span>
-              </button>
-            </div>
-          )}
+          {/* New voucher is available from the persistent navigation action. */}
         </div>
 
         {/* 7 Core Financial Metric Cards (User Requirement 1) */}
