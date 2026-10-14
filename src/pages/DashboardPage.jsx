@@ -13,14 +13,12 @@ import {
   Receipt, 
   AlertTriangle, 
   ShieldCheck, 
-  PlusCircle, 
   Eye, 
   Edit3, 
   Clock, 
   CheckCircle2,
   Calendar,
-  Layers,
-  ArrowRightLeft
+  Layers
 } from 'lucide-react'
 import { 
   ResponsiveContainer, 
@@ -41,7 +39,7 @@ import VoucherModal from '../components/VoucherModal'
 import InvoicePrintModal from '../components/InvoicePrintModal'
 
 export default function DashboardPage() {
-  const { isAdmin, isOwner } = useAuth()
+  const { isAdmin } = useAuth()
   const [metrics, setMetrics] = useState(null)
   const [recentVouchers, setRecentVouchers] = useState([])
   const [chartData, setChartData] = useState([])
