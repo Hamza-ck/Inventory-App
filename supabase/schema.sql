@@ -6,7 +6,7 @@
 -- 3. Permanent Debtor UIDs (for closing due balances) & Creditors Directory
 -- 4. Chart of Accounts Ledgers (Cash, Bank, Loans, Expenses, Incomes)
 -- 5. Role-Based Access Control (Admin full access vs Owner read-only track)
--- 6. Automated stock and ledger balance synchronization triggers
+-- 6. Least-privilege access controls
 -- ==============================================================================
 
 -- 1. User Profiles & Roles
@@ -143,15 +143,19 @@ create policy "Admin manages all profiles" on public.profiles
   with check (public.is_admin());
 
 -- Read policies: Both Owner and Admin can read and track
+drop policy if exists "Authenticated users can read materials" on public.materials;
 create policy "Authenticated users can read materials" on public.materials
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "Authenticated users can read ledgers" on public.ledgers;
 create policy "Authenticated users can read ledgers" on public.ledgers
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "Authenticated users can read parties" on public.parties;
 create policy "Authenticated users can read parties" on public.parties
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "Authenticated users can read vouchers" on public.vouchers;
 create policy "Authenticated users can read vouchers" on public.vouchers
   for select using (auth.role() = 'authenticated');
 
@@ -201,38 +205,3 @@ create policy "Admin can update vouchers" on public.vouchers
 drop policy if exists "Admin can delete vouchers" on public.vouchers;
 create policy "Admin can delete vouchers" on public.vouchers
   for delete using (public.is_admin());
-
--- ==============================================================================
--- Initial Seed Data (Standard Chart of Accounts & Material Stock)
--- ==============================================================================
-
-insert into public.ledgers (name, "group", opening_balance, current_balance, is_system)
-values
-  ('Cash in Hand', 'Cash-in-hand', 45000, 45000, true),
-  ('HDFC Current Account 0422', 'Bank Accounts', 285000, 285000, true),
-  ('State Bank of India (SBI)', 'Bank Accounts', 140000, 140000, true),
-  ('HDFC Business Term Loan', 'Loans (Liability)', 200000, 200000, false),
-  ('Staff Emergency Advances', 'Loans & Advances (Asset)', 15000, 15000, false),
-  ('Sales Account', 'Sales Accounts', 0, 0, true),
-  ('Purchase Account', 'Purchase Accounts', 0, 0, true),
-  ('Shop Rent Expense', 'Indirect Expenses', 0, 0, false),
-  ('Staff Salaries', 'Indirect Expenses', 0, 0, false),
-  ('Electricity & Utilities', 'Indirect Expenses', 0, 0, false)
-on conflict (name) do nothing;
-
-insert into public.materials (sku, name, category, unit, purchase_rate, sales_rate, current_qty, reorder_threshold)
-values
-  ('MAT-CANVAS-01', 'Industrial Cotton Canvas 350 GSM', 'Fabrics & Textiles', 'meter', 140, 195, 450, 50),
-  ('MAT-DENIM-02', 'Heavy Weight Denim Twill 14oz', 'Fabrics & Textiles', 'meter', 180, 260, 280, 40),
-  ('MAT-BOLT-03', 'High Tensile Steel Bolts M12', 'Hardware & Fasteners', 'box', 380, 520, 65, 15),
-  ('MAT-ZIP-04', 'YKK Brass Heavy Zipper 5# (24 inch)', 'Accessories & Trims', 'pcs', 18, 32, 850, 100),
-  ('MAT-THRD-05', 'Polyester Bonded Thread 40/2', 'Accessories & Trims', 'spool', 65, 110, 140, 25)
-on conflict (sku) do nothing;
-
-insert into public.parties (name, type, uid, phone, email, address, opening_balance, current_balance)
-values
-  ('Apex Infotech Pvt Ltd', 'debtor', 'UID-CUST-1001', '+91 98450 11223', 'accounts@apexinfotech.in', 'Plot 44, Electronic City, Bangalore', 24500, 24500),
-  ('Golden Star Garments', 'debtor', 'UID-CUST-1002', '+91 98211 44556', 'purchase@goldenstargarments.com', 'Industrial Area Phase 2, Ludhiana', 18200, 18200),
-  ('Metro Steel & Hardware', 'creditor', null, '+91 98210 99887', 'sales@metrosteel.com', 'Loha Mandi, Delhi', 45000, 45000),
-  ('Supreme Fabrics Mill', 'creditor', null, '+91 98765 43210', 'mill@supremefabrics.com', 'Ring Road Textile Market, Surat', 62000, 62000)
-on conflict do nothing;
