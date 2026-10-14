@@ -35,7 +35,7 @@ let activeScope = 'anonymous'
 const databaseCache = new Map()
 const databaseScopeMap = new WeakMap()
 const tableProxyCache = new WeakMap()
-let syncInFlight = null
+const syncInFlight = new Map()
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function getDatabaseForScope(scope = activeScope) {
@@ -872,11 +872,11 @@ async function pushOutboxJob(db, job, sessionUserId) {
 }
 
 export async function syncOutbox({ force = false } = {}) {
-  if (syncInFlight) return syncInFlight
   const companyId = getActiveCompanyId()
   if (!companyId || (typeof navigator !== 'undefined' && !navigator.onLine)) return getSyncQueueSummary()
+  if (syncInFlight.has(companyId)) return syncInFlight.get(companyId)
 
-  syncInFlight = (async () => {
+  const task = (async () => {
     const db = getDatabaseForScope(companyId)
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
     if (sessionError || !sessionData?.session?.user) return getSyncQueueSummary()
@@ -907,11 +907,12 @@ export async function syncOutbox({ force = false } = {}) {
 
     return getSyncQueueSummary()
   })().finally(() => {
-    syncInFlight = null
+    syncInFlight.delete(companyId)
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('accounting-sync-updated'))
   })
 
-  return syncInFlight
+  syncInFlight.set(companyId, task)
+  return task
 }
 
 /**
