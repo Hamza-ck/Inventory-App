@@ -6,7 +6,7 @@ Reviewed the current React/Vite accounting app, role context, route guard, navig
 
 ## Changes made on this branch
 
-- **Least-privilege role handling:** real sessions now become `admin` only when Supabase returns an `admin` profile. Missing/error profile lookups fall back to read-only instead of silently elevating.
+- **Least-privilege role handling:** real sessions become `admin` only when the selected company membership explicitly says `admin`; missing/unknown roles fall back to read-only. Company creators are assigned `owner` (read-only), not admin, by the follow-up permissions migration. Explicit admin provisioning still needs a trusted workflow.
 - **Demo boundary:** demo login is development-only; sample records are initialized only after explicitly entering local demo mode. The login screen warns that demo records are local and not tenant-isolated.
 - **RLS writes:** the schema removes the permissive `OR auth.role() = 'authenticated'` write clauses and requires `public.is_admin()` for mutations. The profile default is read-only (`owner`). Reapplying the relevant role/write policy definitions is supported through `drop policy if exists`.
 - **Cloud seed safety:** removed fictitious ledgers, parties, and materials from the shared Supabase schema. Existing records are not automatically deleted.
