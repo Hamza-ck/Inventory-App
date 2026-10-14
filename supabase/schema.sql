@@ -122,12 +122,12 @@ language sql
 stable
 security definer
 set search_path = public
-as $
+as $function$
   select exists (
     select 1 from public.profiles
     where id = auth.uid() and role = 'admin'
   );
-$;
+$function$;
 
 revoke all on function public.is_admin() from public;
 grant execute on function public.is_admin() to authenticated;
