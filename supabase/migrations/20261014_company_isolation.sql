@@ -23,6 +23,12 @@ alter table public.ledgers add column if not exists company_id uuid references p
 alter table public.parties add column if not exists company_id uuid references public.companies(id) on delete cascade;
 alter table public.vouchers add column if not exists company_id uuid references public.companies(id) on delete cascade;
 
+-- Soft-delete tombstones let other signed-in devices learn about deletes on next sync.
+alter table public.materials add column if not exists deleted_at timestamptz;
+alter table public.ledgers add column if not exists deleted_at timestamptz;
+alter table public.parties add column if not exists deleted_at timestamptz;
+alter table public.vouchers add column if not exists deleted_at timestamptz;
+
 -- Replace global uniqueness with company-scoped uniqueness. Existing null-company
 -- rows remain preserved but cannot be read through RLS until explicitly assigned.
 alter table public.materials drop constraint if exists materials_sku_key;
@@ -116,6 +122,7 @@ grant execute on function public.create_company_for_current_user(text) to authen
 
 drop policy if exists "Profiles are readable by authenticated users" on public.profiles;
 drop policy if exists "Admin manages all profiles" on public.profiles;
+drop policy if exists "Users can read their own profile" on public.profiles;
 create policy "Users can read their own profile" on public.profiles
   for select using (id = auth.uid());
 
