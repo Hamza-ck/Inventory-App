@@ -10,20 +10,24 @@ export function AuthProvider({ children }) {
 
   // A demo role is an explicit local choice; real sessions use the role loaded from Supabase.
   const [demoRole, setDemoRoleState] = useState(() => {
+    if (!import.meta.env.DEV) {
+      localStorage.removeItem('tally_saas_demo_role')
+      return null
+    }
     const stored = localStorage.getItem('tally_saas_demo_role')
     return stored === 'admin' || stored === 'owner' ? stored : null
   })
   const [role, setRoleState] = useState('owner')
 
   useEffect(() => {
-    // Initialize default accounting data (ledgers, materials, debtors with UIDs, vouchers)
-    initDefaultAccountingData().catch((err) => console.warn('Init DB warning:', err))
-
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       setSession(data.session)
       if (data.session) {
         fetchProfileRole(data.session.user.id)
       } else {
+        if (import.meta.env.DEV && demoRole) {
+          await initDefaultAccountingData().catch((err) => console.warn('Demo data initialization failed:', err))
+        }
         setRoleState(demoRole || 'owner')
         setLoading(false)
       }
@@ -32,6 +36,9 @@ export function AuthProvider({ children }) {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
       if (newSession) {
+        // Clear demo identity as soon as a real account is present.
+        setDemoRoleState(null)
+        localStorage.removeItem('tally_saas_demo_role')
         fetchProfileRole(newSession.user.id)
       } else {
         setRoleState(demoRole || 'owner')
@@ -61,8 +68,11 @@ export function AuthProvider({ children }) {
   }
 
   // Used only by the explicit local-demo buttons on the login screen.
-  function setRole(newRole) {
+  async function setRole(newRole) {
+    // Demo access is only available in local development builds.
+    if (!import.meta.env.DEV) return
     const demoRoleValue = newRole === 'admin' ? 'admin' : 'owner'
+    await initDefaultAccountingData()
     setDemoRoleState(demoRoleValue)
     setRoleState(demoRoleValue)
     localStorage.setItem('tally_saas_demo_role', demoRoleValue)
