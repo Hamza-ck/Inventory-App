@@ -17,7 +17,7 @@ import {
   X
 } from 'lucide-react'
 import { accDb, deleteVoucher } from '../lib/accountingDb'
-import { jsQuery } from '../lib/jsQuery'
+import { getLocalDateString, jsQuery } from '../lib/jsQuery'
 import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
 import VoucherModal from '../components/VoucherModal'
@@ -69,11 +69,13 @@ export default function DayBookPage() {
       q = q.search(searchTerm, ['voucher_no', 'party_name', 'party_uid', 'narration', 'payment_mode'])
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10)
+    const todayStr = getLocalDateString()
     if (dateRange === 'today') {
       q = q.where((v) => (v.date || '').slice(0, 10) === todayStr)
     } else if (dateRange === 'yesterday') {
-      const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const y = getLocalDateString(yesterday)
       q = q.where((v) => (v.date || '').slice(0, 10) === y)
     } else if (dateRange === 'month') {
       const curMonth = todayStr.slice(0, 7)
