@@ -32,6 +32,17 @@ create table if not exists public.materials (
   updated_at timestamptz default now()
 );
 
+-- Ensure columns exist if the table was created in a previous version of the app
+alter table public.materials add column if not exists category text default 'General';
+alter table public.materials add column if not exists purchase_rate numeric not null default 0;
+alter table public.materials add column if not exists sales_rate numeric not null default 0;
+alter table public.materials add column if not exists updated_at timestamptz default now();
+alter table public.materials drop column if exists model;
+
+-- Ensure role check allows admin, owner, employee
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check check (role in ('admin', 'owner', 'employee'));
+
 -- 3. Chart of Accounts Ledgers (Cash, Bank Accounts, Loans, Expenses, Incomes)
 create table if not exists public.ledgers (
   id uuid primary key default gen_random_uuid(),
