@@ -58,7 +58,7 @@ export function AuthProvider({ children }) {
 
       if (selected?.companyId) {
         localStorage.setItem(companyStorageKey(userId), selected.companyId)
-        hydrateCompanyFromSupabase().then(() => initCompanyDefaults()).catch((err) => console.error('Initial company data sync failed:', err))
+        hydrateCompanyFromSupabase().then((result) => result.hydrated ? initCompanyDefaults() : null).catch((err) => console.error('Initial company data sync failed:', err))
       } else {
         localStorage.removeItem(companyStorageKey(userId))
       }
@@ -161,7 +161,7 @@ export function AuthProvider({ children }) {
     setAccountingScope(selected.companyId)
     localStorage.setItem(companyStorageKey(session.user.id), selected.companyId)
     window.dispatchEvent(new Event('accounting-data-updated'))
-    hydrateCompanyFromSupabase().then(() => initCompanyDefaults()).catch((err) => console.error('Company data refresh failed:', err))
+    hydrateCompanyFromSupabase().then((result) => result.hydrated ? initCompanyDefaults() : null).catch((err) => console.error('Company data refresh failed:', err))
   }
 
   async function signOut() {
