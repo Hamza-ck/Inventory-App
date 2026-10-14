@@ -1026,7 +1026,14 @@ export async function hydrateCompanyFromSupabase() {
       window.dispatchEvent(new Event('accounting-data-updated'))
     }
     return { hydrated: true, companyId, counts: Object.fromEntries(entities.map((entity) => [entity, remoteRows[entity].length])) }
-  })().finally(() => hydrationInFlight.delete(companyId))
+  })().catch((error) => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('accounting-sync-error', {
+        detail: { message: error?.message || 'Company data refresh failed.' },
+      }))
+    }
+    throw error
+  }).finally(() => hydrationInFlight.delete(companyId))
 
   hydrationInFlight.set(companyId, task)
   return task
