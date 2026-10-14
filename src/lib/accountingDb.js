@@ -1,5 +1,6 @@
 import Dexie from 'dexie'
 import { supabase } from './supabaseClient'
+import { getLocalDateString } from './jsQuery'
 
 /**
  * Tally SaaS Accounting Database (Dexie + Supabase Hybrid)
@@ -261,7 +262,7 @@ async function applyVoucherEffects(voucher, isReversal = false) {
  */
 export async function createVoucher(voucherData) {
   const data = { ...voucherData }
-  data.date = data.date || new Date().toISOString().slice(0, 10)
+  data.date = data.date || getLocalDateString()
   data.createdAt = new Date().toISOString()
   data.updatedAt = new Date().toISOString()
 
@@ -486,8 +487,8 @@ export async function initDefaultAccountingData() {
   await accDb.parties.bulkAdd(defaultParties)
 
   // 4. Sample Recent Vouchers (Today's & Yesterday's sales, purchases, contrawork)
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const todayStr = getLocalDateString()
+  const yesterday = getLocalDateString(new Date(Date.now() - 86400000))
 
   const sampleVouchers = [
     {
