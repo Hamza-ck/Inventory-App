@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
+import CompanySetupPage from './pages/CompanySetupPage'
 
 // Route-level code splitting
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
@@ -29,6 +30,7 @@ export default function App() {
         >
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/setup-company" element={<CompanySetupPage />} />
             <Route
               path="/"
               element={
