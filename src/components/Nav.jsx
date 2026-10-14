@@ -20,7 +20,7 @@ import { useAuth } from '../context/AuthContext'
 import VoucherModal from './VoucherModal'
 
 export default function Nav() {
-  const { isAdmin, signOut, isDemoMode } = useAuth()
+  const { isAdmin, signOut, isDemoMode, session, companyId, companyName, companyMemberships, setActiveCompany } = useAuth()
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
@@ -88,7 +88,25 @@ export default function Nav() {
             })}
           </nav>
 
-          {/* Right Action Tools: + New Voucher, Role Switcher, Sign Out */}
+          {/* Current company is explicit whenever a real session is active. */}
+          {session && companyMemberships.length > 1 ? (
+            <select
+              aria-label="Current company"
+              value={companyId || ''}
+              onChange={(event) => setActiveCompany(event.target.value)}
+              className="hidden md:block max-w-40 bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-[11px] font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {companyMemberships.map((company) => (
+                <option key={company.companyId} value={company.companyId}>{company.companyName}</option>
+              ))}
+            </select>
+          ) : session && companyName ? (
+            <span className="hidden xl:inline-flex max-w-40 truncate text-[11px] text-slate-300" title={companyName}>
+              {companyName}
+            </span>
+          ) : null}
+
+          {/* Right Action Tools */}
           <div className="flex items-center gap-2.5">
             {/* Quick Voucher Button (Admin only) */}
             {isAdmin ? (
