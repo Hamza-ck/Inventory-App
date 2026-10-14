@@ -122,13 +122,18 @@ async function applyVoucherEffects(voucher, isReversal = false) {
       const itemQty = Number(item.qty) || 0
       if (!itemQty) continue
 
-      let material = null
-      if (item.material_id) {
-        material = await accDb.materials.get(item.material_id)
-      } else if (item.name) {
-        material = await accDb.materials.where('name').equalsIgnoreCase(item.name).first()
-      } else if (item.sku) {
-        material = await accDb.materials.where('sku').equalsIgnoreCase(item.sku).first()
+      // Resolve by stable identifier first. Display names may differ across supplier
+      // invoices/imports, so a name miss must not prevent a valid SKU match.
+      let material = item.material_id
+        ? await accDb.materials.get(Number(item.material_id))
+        : null
+
+      if (!material && item.sku) {
+        material = await accDb.materials.where('sku').equalsIgnoreCase(String(item.sku).trim()).first()
+      }
+
+      if (!material && item.name) {
+        material = await accDb.materials.where('name').equalsIgnoreCase(String(item.name).trim()).first()
       }
 
       if (material) {
@@ -139,7 +144,9 @@ async function applyVoucherEffects(voucher, isReversal = false) {
           delta = itemQty * multiplier // Purchase increases inventory
         }
 
-        const newQty = Math.max(0, (Number(material.current_qty) || 0) + delta)
+        // Preserve the exact movement arithmetic. Clamping at zero makes later
+        // voucher edits/deletions restore the wrong stock when a sale oversells.
+        const newQty = (Number(material.current_qty) || 0) + delta
         await accDb.materials.update(material.id, { current_qty: newQty })
 
         // Also sync to Supabase if connected
