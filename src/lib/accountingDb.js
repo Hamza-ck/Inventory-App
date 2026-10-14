@@ -12,15 +12,177 @@ import { getLocalDateString } from './jsQuery'
  * - Chart of Accounts (Cash, Bank, Loans, Debtors, Creditors, Expenses, Incomes)
  */
 
-export const accDb = new Dexie('TallySaasAccounting')
-
-accDb.version(1).stores({
+const TRACKED_TABLES = {
+  vouchers: { keyOf: (row) => row?.voucher_no, remoteTable: 'vouchers' },
+  materials: { keyOf: (row) => row?.sku, remoteTable: 'materials' },
+  parties: { keyOf: (row) => row?.name ? JSON.stringify([row.type || '', row.name]) : null, remoteTable: 'parties' },
+  ledgers: { keyOf: (row) => row?.name, remoteTable: 'ledgers' },
+}
+const MUTATING_METHODS = new Set(['add', 'put', 'update', 'delete', 'bulkAdd', 'bulkPut', 'bulkDelete', 'clear'])
+const DB_SCHEMA_V1 = {
   vouchers: '++id, voucher_no, voucher_type, date, party_id, party_name, party_uid, amount, due_amount, createdAt',
   materials: '++id, sku, name, category, unit, current_qty, purchase_rate, sales_rate, reorder_threshold',
   parties: '++id, name, type, uid, phone, current_balance',
   ledgers: '++id, name, group, current_balance',
   settings: 'key, value',
+}
+const DB_SCHEMA_V2 = {
+  ...DB_SCHEMA_V1,
+  syncQueue: '++id, entity, operation, entity_key, company_id, status, created_at, next_attempt_at',
+}
+
+let activeScope = 'anonymous'
+const databaseCache = new Map()
+const tableProxyCache = new WeakMap()
+let syncInFlight = null
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function getDatabaseForScope(scope = activeScope) {
+  const normalizedScope = String(scope || 'anonymous')
+  if (databaseCache.has(normalizedScope)) return databaseCache.get(normalizedScope)
+
+  // Never reuse the old unscoped database for signed-in tenants. Existing legacy
+  // data is preserved in TallySaasAccounting and requires an explicit migration.
+  const safeScope = normalizedScope.replace(/[^a-zA-Z0-9_-]/g, '_')
+  const db = new Dexie('TallySaasAccounting_' + safeScope)
+  db.version(1).stores(DB_SCHEMA_V1)
+  db.version(2).stores(DB_SCHEMA_V2)
+  databaseCache.set(normalizedScope, db)
+  return db
+}
+
+function getCurrentDatabase() {
+  const tx = Dexie.currentTransaction
+  if (tx?.db && [...databaseCache.values()].includes(tx.db)) return tx.db
+  return getDatabaseForScope(activeScope)
+}
+
+export function setAccountingScope(scope) {
+  activeScope = String(scope || 'anonymous')
+  return getDatabaseForScope(activeScope)
+}
+
+export function getActiveCompanyId() {
+  return UUID_RE.test(activeScope) ? activeScope : null
+}
+
+function notifySyncChanged() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event('accounting-sync-updated'))
+  setTimeout(() => { syncOutbox().catch((err) => console.warn('Sync retry deferred:', err)) }, 0)
+}
+
+async function addOutboxJob(db, entity, operation, entityKey) {
+  const companyId = getActiveCompanyId()
+  if (!companyId || !entityKey || !db.syncQueue) return
+  await db.syncQueue.add({
+    entity,
+    operation,
+    entity_key: String(entityKey),
+    company_id: companyId,
+    status: 'pending',
+    attempts: 0,
+    last_error: '',
+    created_at: new Date().toISOString(),
+    next_attempt_at: new Date(0).toISOString(),
+  })
+}
+
+function parsePartyKey(key) {
+  try {
+    const parsed = JSON.parse(key)
+    if (Array.isArray(parsed) && parsed.length === 2) return { type: parsed[0], name: parsed[1] }
+  } catch { /* Older queue entries can use a plain name. */ }
+  return { type: '', name: String(key || '') }
+}
+
+function makeTrackedTable(db, tableName) {
+  const table = db.table(tableName)
+  if (tableProxyCache.has(table)) return tableProxyCache.get(table)
+
+  const proxy = new Proxy(table, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target)
+      if (typeof value !== 'function') return value
+      if (!MUTATING_METHODS.has(property) || !TRACKED_TABLES[tableName]) return value.bind(target)
+
+      return (...args) => {
+        const run = async () => {
+          let oldRows = []
+          if (property === 'update' || property === 'delete') {
+            const old = await target.get(args[0])
+            if (old) oldRows = [old]
+          } else if (property === 'bulkDelete') {
+            oldRows = (await Promise.all((args[0] || []).map((key) => target.get(key)))).filter(Boolean)
+          } else if (property === 'clear') {
+            oldRows = await target.toArray()
+          }
+
+          const result = await value.apply(target, args)
+          const meta = TRACKED_TABLES[tableName]
+
+          if (property === 'delete' || property === 'bulkDelete' || property === 'clear') {
+            for (const oldRow of oldRows) {
+              const oldKey = meta.keyOf(oldRow)
+              if (oldKey) await addOutboxJob(db, tableName, 'delete', oldKey)
+            }
+          } else if (property === 'update') {
+            const newRow = await target.get(args[0])
+            const oldKey = oldRows.length ? meta.keyOf(oldRows[0]) : null
+            const newKey = meta.keyOf(newRow)
+            if (oldKey && newKey && String(oldKey) !== String(newKey)) {
+              await addOutboxJob(db, tableName, 'delete', oldKey)
+            }
+            if (newKey) await addOutboxJob(db, tableName, 'upsert', newKey)
+          } else {
+            const inputRows = Array.isArray(args[0]) ? args[0] : [args[0]]
+            for (const inputRow of inputRows) {
+              if (!inputRow) continue
+              let row = inputRow
+              if (property === 'add' || property === 'put') {
+                const key = property === 'add' ? result : (result ?? inputRow.id)
+                if (key !== undefined && key !== null) row = (await target.get(key)) || inputRow
+              }
+              const key = meta.keyOf(row)
+              if (key) await addOutboxJob(db, tableName, 'upsert', key)
+            }
+          }
+
+          if (UUID_RE.test(activeScope)) notifySyncChanged()
+          return result
+        }
+
+        const currentTx = Dexie.currentTransaction
+        if (currentTx?.db === db) return run()
+        return db.transaction('rw', ...db.tables, run)
+      }
+    },
+  })
+
+  tableProxyCache.set(table, proxy)
+  return proxy
+}
+
+export const accDb = new Proxy({}, {
+  get(_target, property) {
+    const db = getCurrentDatabase()
+    if (typeof property === 'string' && TRACKED_TABLES[property]) return makeTrackedTable(db, property)
+    const value = Reflect.get(db, property, db)
+    return typeof value === 'function' ? value.bind(db) : value
+  },
 })
+
+export async function getSyncQueueSummary() {
+  const companyId = getActiveCompanyId()
+  if (!companyId) return { pending: 0, withErrors: 0 }
+  const db = getDatabaseForScope(companyId)
+  const jobs = await db.syncQueue.toArray()
+  const scopedJobs = jobs.filter((job) => job.company_id === companyId)
+  return {
+    pending: scopedJobs.length,
+    withErrors: scopedJobs.filter((job) => Number(job.attempts) > 0 || Boolean(job.last_error)).length,
+  }
+}
 
 // Generate Next Debtor Permanent UID: UID-CUST-1001, UID-CUST-1002, etc.
 export async function generateNextDebtorUid() {
@@ -150,12 +312,7 @@ async function applyVoucherEffects(voucher, isReversal = false) {
         const newQty = (Number(material.current_qty) || 0) + delta
         await accDb.materials.update(material.id, { current_qty: newQty })
 
-        // Also sync to Supabase if connected
-        try {
-          await supabase.from('materials').update({ current_qty: newQty }).eq('sku', material.sku)
-        } catch {
-          // offline safe
-        }
+        // The tracked-table proxy writes a retryable outbox item in this transaction.
       }
     }
   }
@@ -261,106 +418,86 @@ async function applyVoucherEffects(voucher, isReversal = false) {
  * Save New Voucher (Sales, Purchase, Payment, Receipt, Contra, Journal)
  */
 export async function createVoucher(voucherData) {
+  const db = getCurrentDatabase()
   const data = { ...voucherData }
   data.date = data.date || getLocalDateString()
   data.createdAt = new Date().toISOString()
   data.updatedAt = new Date().toISOString()
 
-  // Generate Voucher Number if not provided
   if (!data.voucher_no) {
     const prefix = (data.voucher_type || 'VCH').slice(0, 3).toUpperCase()
     data.voucher_no = `${prefix}-${Date.now().toString().slice(-6)}`
   }
 
-  // Handle Debtor UID logic on Sales
-  if (data.voucher_type === 'sales') {
-    const { party, uid } = await resolvePartyUidOnSale(
-      data.party_name,
-      data.due_amount,
-      data.party_phone
-    )
-    if (party) {
-      data.party_id = party.id
+  const created = await db.transaction('rw', ...db.tables, async () => {
+    if (data.voucher_type === 'sales') {
+      const { party, uid } = await resolvePartyUidOnSale(data.party_name, data.due_amount, data.party_phone)
+      if (party) data.party_id = party.id
+      if (uid) data.party_uid = uid
     }
-    if (uid) {
-      data.party_uid = uid
-    }
-  }
 
-  // Insert into Dexie
-  const id = await accDb.vouchers.add(data)
-  data.id = id
+    const id = await accDb.vouchers.add(data)
+    data.id = id
+    await applyVoucherEffects(data, false)
+    return data
+  })
 
-  // Apply financial & inventory effects
-  await applyVoucherEffects(data, false)
-
-  // Asynchronously sync to Supabase cloud if connected
-  syncVoucherToSupabase(data).catch(() => {})
-
-  return data
+  notifySyncChanged()
+  return created
 }
 
 /**
  * Modify Voucher (Tally Methodology: Everything is customizable / editable)
  */
 export async function updateVoucher(id, updatedData) {
-  const existingVoucher = await accDb.vouchers.get(Number(id))
-  if (!existingVoucher) {
-    throw new Error('Voucher not found for modification')
-  }
+  const db = getCurrentDatabase()
+  const updated = await db.transaction('rw', ...db.tables, async () => {
+    const existingVoucher = await db.vouchers.get(Number(id))
+    if (!existingVoucher) throw new Error('Voucher not found for modification')
 
-  // 1. Revert previous effects
-  await applyVoucherEffects(existingVoucher, true)
+    // Reverse, replace, and reapply within one IndexedDB transaction.
+    await applyVoucherEffects(existingVoucher, true)
+    const newVoucher = {
+      ...existingVoucher,
+      ...updatedData,
+      updatedAt: new Date().toISOString(),
+    }
 
-  // 2. Merge changes
-  const newVoucher = {
-    ...existingVoucher,
-    ...updatedData,
-    updatedAt: new Date().toISOString(),
-  }
+    if (newVoucher.voucher_type === 'sales') {
+      const { party, uid } = await resolvePartyUidOnSale(
+        newVoucher.party_name,
+        newVoucher.due_amount,
+        newVoucher.party_phone
+      )
+      if (party) newVoucher.party_id = party.id
+      if (uid) newVoucher.party_uid = uid
+    }
 
-  // If sales, check UID logic
-  if (newVoucher.voucher_type === 'sales') {
-    const { party, uid } = await resolvePartyUidOnSale(
-      newVoucher.party_name,
-      newVoucher.due_amount,
-      newVoucher.party_phone
-    )
-    if (party) newVoucher.party_id = party.id
-    if (uid) newVoucher.party_uid = uid
-  }
+    await accDb.vouchers.put(newVoucher)
+    await applyVoucherEffects(newVoucher, false)
+    return newVoucher
+  })
 
-  // 3. Update in Dexie
-  await accDb.vouchers.put(newVoucher)
-
-  // 4. Apply new effects
-  await applyVoucherEffects(newVoucher, false)
-
-  // Asynchronously sync to Supabase
-  syncVoucherToSupabase(newVoucher).catch(() => {})
-
-  return newVoucher
+  notifySyncChanged()
+  return updated
 }
 
 /**
  * Delete Voucher (Tally Cancellation / Undo)
  */
 export async function deleteVoucher(id) {
-  const existingVoucher = await accDb.vouchers.get(Number(id))
-  if (!existingVoucher) return false
+  const db = getCurrentDatabase()
+  const deleted = await db.transaction('rw', ...db.tables, async () => {
+    const existingVoucher = await db.vouchers.get(Number(id))
+    if (!existingVoucher) return false
 
-  // Revert all effects
-  await applyVoucherEffects(existingVoucher, true)
+    await applyVoucherEffects(existingVoucher, true)
+    await db.vouchers.delete(Number(id))
+    return true
+  })
 
-  // Remove from database
-  await accDb.vouchers.delete(Number(id))
-
-  // Asynchronously delete from Supabase
-  if (existingVoucher.voucher_no) {
-    syncDeleteVoucherFromSupabase(existingVoucher.voucher_no).catch(() => {})
-  }
-
-  return true
+  if (deleted) notifySyncChanged()
+  return deleted
 }
 
 /**
@@ -590,38 +727,165 @@ export async function initDefaultAccountingData() {
 }
 
 /**
- * Cloud Synchronization Helpers with Supabase (Offline-first resilient)
+ * Durable, tenant-scoped cloud outbox. A job is deleted only after the cloud
+ * confirms success; errors remain in IndexedDB with exponential-backoff retry.
  */
-export async function syncVoucherToSupabase(voucher) {
-  try {
-    const payload = {
-      voucher_no: voucher.voucher_no,
-      voucher_type: voucher.voucher_type,
-      date: voucher.date,
-      party_name: voucher.party_name,
-      party_uid: voucher.party_uid || null,
-      amount: Number(voucher.amount) || 0,
-      paid_amount: Number(voucher.paid_amount) || 0,
-      due_amount: Number(voucher.due_amount) || 0,
-      payment_mode: voucher.payment_mode || 'Cash',
-      narration: voucher.narration || '',
-      reference_no: voucher.reference_no || '',
-      items: voucher.items || [],
+function getEntityRecord(db, entity, key) {
+  if (entity === 'vouchers') return db.vouchers.where('voucher_no').equals(key).first()
+  if (entity === 'materials') return db.materials.where('sku').equals(key).first()
+  if (entity === 'ledgers') return db.ledgers.where('name').equals(key).first()
+  if (entity === 'parties') {
+    const identity = parsePartyKey(key)
+    return db.parties.where('name').equalsIgnoreCase(identity.name)
+      .and((party) => !identity.type || party.type === identity.type).first()
+  }
+  return null
+}
+
+async function pushOutboxJob(db, job, sessionUserId) {
+  const companyId = job.company_id
+  const entity = job.entity
+  const identity = job.entity_key
+
+  if (job.operation === 'delete') {
+    let request = supabase.from(entity).delete().eq('company_id', companyId)
+    if (entity === 'vouchers') request = request.eq('voucher_no', identity)
+    else if (entity === 'materials') request = request.eq('sku', identity)
+    else if (entity === 'ledgers') request = request.eq('name', identity)
+    else if (entity === 'parties') {
+      const party = parsePartyKey(identity)
+      request = request.eq('name', party.name).eq('type', party.type)
+    }
+    const { error } = await request
+    if (error) throw error
+    return
+  }
+
+  const row = await getEntityRecord(db, entity, identity)
+  if (!row) return
+
+  let payload
+  let onConflict
+  if (entity === 'vouchers') {
+    payload = {
+      company_id: companyId,
+      voucher_no: row.voucher_no,
+      voucher_type: row.voucher_type,
+      date: row.date,
+      party_name: row.party_name || 'Cash',
+      party_uid: row.party_uid || null,
+      amount: Number(row.amount) || 0,
+      paid_amount: Number(row.paid_amount) || 0,
+      due_amount: Number(row.due_amount) || 0,
+      payment_mode: row.payment_mode || 'Cash',
+      narration: row.narration || '',
+      reference_no: row.reference_no || '',
+      items: row.items || [],
+      created_by: sessionUserId,
       updated_at: new Date().toISOString(),
     }
-
-    await supabase.from('vouchers').upsert(payload, { onConflict: 'voucher_no' })
-  } catch (err) {
-    // Graceful offline fallback
-    console.debug('Cloud sync deferred (offline):', err.message)
+    onConflict = 'company_id,voucher_no'
+  } else if (entity === 'materials') {
+    payload = {
+      company_id: companyId,
+      sku: row.sku,
+      name: row.name,
+      category: row.category || 'General',
+      unit: row.unit || 'pcs',
+      purchase_rate: Number(row.purchase_rate) || 0,
+      sales_rate: Number(row.sales_rate) || 0,
+      current_qty: Number(row.current_qty) || 0,
+      reorder_threshold: Number(row.reorder_threshold) || 0,
+      updated_at: new Date().toISOString(),
+    }
+    onConflict = 'company_id,sku'
+  } else if (entity === 'parties') {
+    payload = {
+      company_id: companyId,
+      name: row.name,
+      type: row.type,
+      uid: row.uid || null,
+      phone: row.phone || '',
+      email: row.email || '',
+      address: row.address || '',
+      opening_balance: Number(row.opening_balance) || 0,
+      current_balance: Number(row.current_balance) || 0,
+      updated_at: new Date().toISOString(),
+    }
+    onConflict = 'company_id,name,type'
+  } else if (entity === 'ledgers') {
+    payload = {
+      company_id: companyId,
+      name: row.name,
+      group: row.group || 'General',
+      opening_balance: Number(row.opening_balance) || 0,
+      current_balance: Number(row.current_balance) || 0,
+      is_system: Boolean(row.is_system),
+    }
+    onConflict = 'company_id,name'
+  } else {
+    throw new Error(`Unsupported sync entity: ${entity}`)
   }
+
+  const { error } = await supabase.from(entity).upsert(payload, { onConflict })
+  if (error) throw error
+}
+
+export async function syncOutbox() {
+  if (syncInFlight) return syncInFlight
+  const companyId = getActiveCompanyId()
+  if (!companyId || (typeof navigator !== 'undefined' && !navigator.onLine)) return getSyncQueueSummary()
+
+  syncInFlight = (async () => {
+    const db = getDatabaseForScope(companyId)
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError || !sessionData?.session?.user) return getSyncQueueSummary()
+
+    const jobs = (await db.syncQueue.where('company_id').equals(companyId).toArray())
+      .filter((job) => job.status === 'pending' && new Date(job.next_attempt_at || 0).getTime() <= Date.now())
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .slice(0, 25)
+
+    for (const job of jobs) {
+      if (getActiveCompanyId() !== companyId) break
+      try {
+        await pushOutboxJob(db, job, sessionData.session.user.id)
+        await db.syncQueue.delete(job.id)
+      } catch (error) {
+        const attempts = (Number(job.attempts) || 0) + 1
+        const delayMs = Math.min(5 * 60 * 1000, 1000 * (2 ** Math.min(attempts, 8)))
+        await db.syncQueue.update(job.id, {
+          attempts,
+          last_error: error?.message || 'Unknown cloud sync error',
+          next_attempt_at: new Date(Date.now() + delayMs).toISOString(),
+        })
+        setTimeout(() => {
+          if (getActiveCompanyId() === companyId) syncOutbox().catch(() => {})
+        }, delayMs + 50)
+      }
+    }
+
+    return getSyncQueueSummary()
+  })().finally(() => {
+    syncInFlight = null
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('accounting-sync-updated'))
+  })
+
+  return syncInFlight
+}
+
+// Compatibility helpers: normal voucher mutations are queued automatically by the
+// tracked-table proxy. These functions remain available to older call sites.
+export async function syncVoucherToSupabase(voucher) {
+  const companyId = getActiveCompanyId()
+  if (!companyId || !voucher?.voucher_no) return
+  await addOutboxJob(getCurrentDatabase(), 'vouchers', 'upsert', voucher.voucher_no)
+  notifySyncChanged()
 }
 
 export async function syncDeleteVoucherFromSupabase(voucherNo) {
-  try {
-    await supabase.from('vouchers').delete().eq('voucher_no', voucherNo)
-  } catch (err) {
-    console.debug('Cloud sync deferred (offline):', err.message)
-  }
+  const companyId = getActiveCompanyId()
+  if (!companyId || !voucherNo) return
+  await addOutboxJob(getCurrentDatabase(), 'vouchers', 'delete', voucherNo)
+  notifySyncChanged()
 }
-
