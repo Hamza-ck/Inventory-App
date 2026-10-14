@@ -33,6 +33,7 @@ const DB_SCHEMA_V2 = {
 
 let activeScope = 'anonymous'
 const databaseCache = new Map()
+const databaseScopeMap = new WeakMap()
 const tableProxyCache = new WeakMap()
 let syncInFlight = null
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -48,6 +49,7 @@ function getDatabaseForScope(scope = activeScope) {
   db.version(1).stores(DB_SCHEMA_V1)
   db.version(2).stores(DB_SCHEMA_V2)
   databaseCache.set(normalizedScope, db)
+  databaseScopeMap.set(db, normalizedScope)
   return db
 }
 
@@ -73,7 +75,8 @@ function notifySyncChanged() {
 }
 
 async function addOutboxJob(db, entity, operation, entityKey) {
-  const companyId = getActiveCompanyId()
+  const databaseScope = databaseScopeMap.get(db) || activeScope
+  const companyId = UUID_RE.test(databaseScope) ? databaseScope : null
   if (!companyId || !entityKey || !db.syncQueue) return
   await db.syncQueue.add({
     entity,
@@ -148,7 +151,7 @@ function makeTrackedTable(db, tableName) {
             }
           }
 
-          if (UUID_RE.test(activeScope)) notifySyncChanged()
+          if (UUID_RE.test(databaseScopeMap.get(db) || activeScope)) notifySyncChanged()
           return result
         }
 
