@@ -35,9 +35,14 @@ export default function Login() {
     }
   }
 
-  function handleDemoLogin(selectedRole) {
-    setRole(selectedRole)
-    navigate('/')
+  async function handleDemoLogin(selectedRole) {
+    setError(null)
+    try {
+      await setRole(selectedRole)
+      navigate('/')
+    } catch {
+      setError('Could not initialize local demo data. Please reload and try again.')
+    }
   }
 
   return (
@@ -61,7 +66,8 @@ export default function Login() {
           <p className="text-xs text-slate-400 mt-1">Complete Accounting Solutions &amp; Tally Engine</p>
         </div>
 
-        {/* Demo Fast Access Buttons */}
+        {/* Demo Fast Access Buttons are intentionally development-only. */}
+        {import.meta.env.DEV && (
         <div className="mb-6 p-3.5 bg-slate-800/80 rounded-2xl border border-slate-700 space-y-2">
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-300">
             <Sparkles className="w-3.5 h-3.5 text-blue-400" />
@@ -92,6 +98,7 @@ export default function Login() {
             </button>
           </div>
         </div>
+        )}
 
         <div className="relative flex py-2 items-center mb-4">
           <div className="flex-grow border-t border-slate-800"></div>
