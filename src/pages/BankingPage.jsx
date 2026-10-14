@@ -17,6 +17,7 @@ import {
 import { accDb, createVoucher } from '../lib/accountingDb'
 import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
+import { getLocalDateString } from '../lib/jsQuery'
 
 export default function BankingPage() {
   const { isAdmin, isOwner } = useAuth()
@@ -90,7 +91,7 @@ export default function BankingPage() {
       await createVoucher({
         voucher_type: 'contra',
         voucher_no: `CNT-${Date.now().toString().slice(-5)}`,
-        date: new Date().toISOString().slice(0, 10),
+        date: getLocalDateString(),
         amount: amt,
         paid_amount: amt,
         due_amount: 0,
