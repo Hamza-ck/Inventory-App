@@ -19,31 +19,29 @@ Reviewed the current React/Vite accounting app, role context, route guard, navig
 
 ## Remaining high-priority findings
 
-### P0 — Do not use as a multi-tenant production accounting service yet
+### P0 — Do not treat this as a production accounting ledger yet
 
-1. **No tenant/company ownership boundary in Supabase.** `materials`, `ledgers`, `parties`, and `vouchers` have no `tenant_id`/company key. Read policies currently let all authenticated users read every row. The new write policy narrows who can mutate records, but it does not isolate one business from another. Add a tenant/company model, membership table, tenant-scoped RLS, and tenant-scoped uniqueness constraints before hosting multiple businesses.
-2. **The browser database is global to the browser profile.** Dexie uses the fixed database name `TallySaasAccounting`, not an authenticated user or business scope. Local records can therefore appear across account changes on the same browser. Partition local data by tenant/user and design an explicit migration for existing local records; do not silently guess which account owns old records.
-3. **Cloud synchronization is incomplete.** Voucher upserts/deletes are best-effort and catch errors without surfacing sync status or queuing retry work. Masters and all balance mutations are not consistently synchronized or hydrated from Supabase. A green/successful local save can therefore diverge from cloud data. Add an explicit outbox/sync state, retry with idempotency, conflict handling, and a visible last-sync/error indicator.
-4. **Financial writes are not atomic.** Voucher creation/edit/delete modifies the voucher plus inventory, party, and ledger balances as separate writes. A failure mid-operation can leave balances inconsistent. Wrap local mutations in Dexie transactions and move authoritative posting/reversal into a trusted database transaction/RPC with reconciliation tests.
-5. **Existing fake data may remain.** The revised schema no longer inserts sample rows on a fresh setup, but it intentionally does not delete records from an already-used database. Review any existing rows with demo names before real use; do not run a blind deletion against a database that might contain real records.
+1. **Cloud replication is not an atomic accounting posting engine.** Browser-local voucher posting is now wrapped in one Dexie transaction covering the voucher, stock, party/ledger effects, and outbox entries. The cloud outbox still synchronizes each entity separately, so a partial network failure can temporarily leave cloud snapshots inconsistent. A trusted Postgres posting/reversal RPC with idempotency keys is the next step before cloud data is treated as authoritative.
+2. **Multi-device conflict resolution is incomplete.** The sync process uses last-write snapshots and does not yet provide optimistic concurrency/version checks. Two devices editing the same voucher or stock master can overwrite each other. Add row versions and conflict review rather than silently overwriting.
+3. **Legacy cloud data needs deliberate assignment.** The company migration preserves old rows with `company_id = NULL`; RLS hides them until the owner maps them to the correct company. Back up and verify the data before any assignment. The migration must be run after `supabase/schema.sql`.
+4. **Existing local legacy data is not automatically migrated.** Signed-in companies use separate IndexedDB databases named by company UUID. The old unscoped `TallySaasAccounting` database is preserved, not copied into a company automatically. Provide a reviewed import/migration workflow before using any legacy local records.
 
 ### P1 — Accounting logic and correctness
 
-- **Negative stock is now visible in the arithmetic, not prevented.** This preserves reversal correctness but means sales can make stock negative. Add an explicit configurable negative-stock policy and pre-posting validation, including the edit case where the old voucher is reversed before the new one is applied.
-- **Party and ledger balances are maintained as mutable totals.** They can drift from voucher history, especially after imports, partial failures, or edits. Prefer deriving/reconciling balances from journal entries and keep immutable audit events for posted/cancelled vouchers.
-- **UID generation scans all parties and is race-prone.** Concurrent sales can generate the same UID because the max+1 scan is not atomic across browser tabs/devices. Move UID allocation to a database sequence or a unique-constraint-protected server function.
-- **Date boundary testing is still required.** The main voucher defaults, dashboard, sales filter, day-book filter, banking settlements, and party settlements now use local business-date helpers, but add automated tests around midnight and timezone changes before relying on them for accounting periods.
-- **Profit remains partly estimated.** The dashboard now states that 20% is estimated when cost rates are missing; make this estimate even more explicit in exports and metric cards, and consider showing estimated and cost-backed portions separately.
-- **Tally import needs a dry-run and duplicate protection.** Validate rows, match items by stable code/SKU, show unmatched masters and duplicate voucher numbers, then require confirmation before committing. Never silently apply guessed costs or quantities.
-- **Cloud RLS is not the same as local authorization.** UI role checks are a usability layer; every cloud mutation needs RLS/server enforcement, and local write controls must be scoped to the active local mode.
+- **Negative stock is still allowed.** It preserves exact reversal arithmetic, but the app needs a configurable policy and pre-posting validation.
+- **Party and ledger balances are mutable totals.** They can drift after imports or conflicting edits. Add journal entries, immutable posting events, and a reconciliation report.
+- **Debtor UID generation is browser-local and race-prone.** Move UID allocation to a database sequence or a unique-constraint-protected RPC before concurrent multi-device entry.
+- **Date boundary tests are still required.** Add automated tests around midnight and timezone changes.
+- **Profit remains partly estimated.** Cost rates missing from an item use a 20% estimate; clearly distinguish estimated and cost-backed profit in exports and summary cards.
+- **Tally import needs a dry-run and duplicate protection.** Validate rows, show unmatched masters/duplicate voucher numbers, and require confirmation before committing.
+- **Validation/test coverage remains limited.** Add regression tests for posting, edit reversal, delete reversal, import, tenant RLS, retry idempotency, and two-company isolation.
 
 ### P2 — UI/UX and maintainability
 
-- Keep one clear primary action per page and reduce duplicate “New Voucher” entry points where a contextual page action already exists.
-- Increase small secondary text and action hit areas on dense accounting tables; provide mobile card/row details instead of forcing wide horizontal tables.
-- Add empty states that tell the user what to do next, destructive-action confirmation with voucher identifiers, and clear validation close to the relevant field.
-- Give save, import, and sync distinct states: saving, saved locally, synced, and sync failed. Do not use success alerts for incomplete cloud synchronization.
-- Add automated tests for posting, edit-reversal, delete-reversal, UID assignment, CSV/XLS import, and RLS role behavior before expanding features.
+- Keep one clear primary action per page and contextual actions where possible.
+- Increase secondary text and action hit areas on dense accounting tables; add mobile-friendly row/card layouts.
+- Provide empty states, clear field-level validation, and confirmations that include voucher identifiers.
+- Keep save, locally saved, syncing, synced, and sync failed as distinct states. The sync control now surfaces cloud hydration errors and allows immediate retry of queued writes.
 
 ## Suggested next sequence
 
