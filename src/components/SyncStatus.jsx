@@ -80,7 +80,7 @@ export default function SyncStatus() {
           ? `Queued ${summary.pending}`
           : 'No pending sync'
 
-  const Icon = !online ? CloudOff : syncing ? LoaderCircle : summary.withErrors > 0 ? AlertCircle : summary.pending > 0 ? Cloud : CheckCircle2
+  const Icon = syncError || summary.withErrors > 0 ? AlertCircle : !online ? CloudOff : syncing ? LoaderCircle : summary.pending > 0 ? Cloud : CheckCircle2
   const title = syncError
     ? syncError
     : !online
