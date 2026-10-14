@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { accDb, createVoucher, updateVoucher } from '../lib/accountingDb'
 import { useAuth } from '../context/AuthContext'
+import { getLocalDateString } from '../lib/jsQuery'
 
 const VOUCHER_TYPES = [
   { id: 'sales', label: 'Sales (F8)', color: 'bg-emerald-600 text-white', border: 'border-emerald-600' },
@@ -36,7 +37,7 @@ export default function VoucherModal({ isOpen, onClose, editingVoucher = null, o
   // Form State
   const [voucherType, setVoucherType] = useState('sales')
   const [voucherNo, setVoucherNo] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(getLocalDateString())
   const [partyName, setPartyName] = useState('')
   const [partyPhone, setPartyPhone] = useState('')
   const [paymentMode, setPaymentMode] = useState('HDFC Bank')
@@ -76,7 +77,7 @@ export default function VoucherModal({ isOpen, onClose, editingVoucher = null, o
     if (editingVoucher) {
       setVoucherType(editingVoucher.voucher_type || 'sales')
       setVoucherNo(editingVoucher.voucher_no || '')
-      setDate(editingVoucher.date || new Date().toISOString().slice(0, 10))
+      setDate(editingVoucher.date || getLocalDateString())
       setPartyName(editingVoucher.party_name || '')
       setPartyPhone(editingVoucher.party_phone || '')
       setPaymentMode(editingVoucher.payment_mode || 'HDFC Bank')
@@ -99,7 +100,7 @@ export default function VoucherModal({ isOpen, onClose, editingVoucher = null, o
       // Reset defaults
       setVoucherType('sales')
       setVoucherNo(`INV-${Date.now().toString().slice(-5)}`)
-      setDate(new Date().toISOString().slice(0, 10))
+      setDate(getLocalDateString())
       setPartyName('')
       setPartyPhone('')
       setPaymentMode('HDFC Bank')
