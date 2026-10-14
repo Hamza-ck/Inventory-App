@@ -52,7 +52,7 @@ export default function CompanySetupPage() {
         <div className="mt-5 rounded-xl border border-emerald-900/70 bg-emerald-950/30 p-3 flex items-start gap-2.5">
           <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0 text-emerald-300" />
           <p className="text-xs text-emerald-100/90 leading-5">
-            You will be the first company administrator. Other users must be added through a trusted invitation or administrator workflow.
+            You will have Owner access: you can view and interact with business records, but cannot create, edit, delete, or import records. An explicitly assigned Admin account has full operational access.
           </p>
         </div>
         <form onSubmit={handleSubmit} className="mt-6 space-y-3">
@@ -85,7 +85,7 @@ export default function CompanySetupPage() {
           </button>
         </form>
         <p className="mt-4 text-[11px] text-slate-500 leading-5">
-          If company creation fails with a missing function/table error, first run <code className="text-slate-300">supabase/migrations/20261014_company_isolation.sql</code> in the Supabase SQL Editor.
+          If company creation fails with a missing function/table error, first run <code className="text-slate-300">supabase/migrations/20261014_owner_readonly_permissions.sql</code> in the Supabase SQL Editor.
         </p>
       </section>
     </div>
