@@ -2,7 +2,7 @@
 
 TallyFlow is a React-based, browser accounting prototype with a local IndexedDB (Dexie) data store and Supabase integration. It includes dashboard summaries, vouchers/day book, sales invoices, material inventory, debtors and creditors, banking/cash views, and Tally XML/Excel import/export tools.
 
-> **Production readiness:** this repository is not yet safe for multi-business production use. The local database is not scoped by user/company, Supabase rows are not tenant-isolated, and the cloud sync implementation is best-effort. Read [AUDIT_AND_UX_REVIEW.md](./AUDIT_AND_UX_REVIEW.md) before connecting real financial records.
+> **Production readiness:** company-scoped storage, membership-based Supabase RLS, retryable sync, and cloud hydration are implemented as a first pass. This is not yet fully production-ready: cloud replication is not an atomic accounting ledger, and multi-device conflict resolution and accounting reconciliation still require testing. Read [AUDIT_AND_UX_REVIEW.md](./AUDIT_AND_UX_REVIEW.md) before connecting real financial records.
 
 ## Main modules
 
@@ -56,37 +56,16 @@ The **Demo Admin** and **Demo Owner** buttons are only shown in development buil
 
 ## Supabase setup
 
-1. Create a Supabase project.
-2. Run `supabase/schema.sql` in the SQL editor.
-3. Create users through Supabase Auth.
-4. Add a profile row for each user using that user's Auth UUID. Assign `admin` only to the account that genuinely needs write access; use `owner` for read-only accounts.
-
-   Example for an administrator:
-
-   ```sql
-   insert into public.profiles (id, role, full_name)
-   values ('<auth-user-uuid>', 'admin', 'Administrator')
-   on conflict (id) do update
-     set role = excluded.role,
-         full_name = excluded.full_name;
-   ```
-
-   Example for a read-only profile:
-
-   ```sql
-   insert into public.profiles (id, role, full_name)
-   values ('<auth-user-uuid>', 'owner', 'Owner')
-   on conflict (id) do update
-     set role = excluded.role,
-         full_name = excluded.full_name;
-   ```
-
-The schema defaults new profile roles to read-only. A missing profile is also treated as read-only by the frontend.
+1. Create a Supabase project and configure `.env` using the example above.
+2. Run `supabase/schema.sql` in the SQL Editor.
+3. Run `supabase/migrations/20261014_company_isolation.sql` in the SQL Editor **after** the schema. This adds companies, memberships, tenant-scoped uniqueness, and company-membership RLS. Legacy cloud rows are deliberately left unassigned and inaccessible until you explicitly map them to a company.
+4. Enable Supabase Auth sign-in and create your user.
+5. Sign in to the app and create the company from the company setup screen. The setup RPC creates the initial administrator membership; do not manually grant roles in the old `profiles` table for company access.
 
 ### Existing Supabase projects
 
-The schema no longer inserts demo ledgers, parties, or materials into a shared cloud database. Running the updated schema does **not** delete any sample rows that may already exist in a previously configured project. Review existing records manually before live use; do not blindly delete records if any real data may be present.
-
+Back up the project before running migrations. The migration preserves legacy accounting rows with `company_id = NULL`; it does not guess which business owns them. Assign existing rows to a verified company only after reviewing them. Do not delete legacy rows blindly. Global unique constraints are replaced with company-scoped indexes so different companies can use the same SKU, ledger name, party name, and voucher number.
+ 
 ## Important architecture notes
 
 - Most page reads and accounting calculations currently use the browser-local Dexie database.
