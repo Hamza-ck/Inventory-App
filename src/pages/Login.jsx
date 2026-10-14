@@ -76,9 +76,6 @@ export default function Login() {
           <p className="text-[11px] leading-relaxed text-amber-200/90">
             Demo mode uses this browser’s local records and is not isolated from a real account. Do not enter real business or customer data in demo mode.
           </p>
-          <p className="text-[11px] leading-relaxed text-amber-200/90">
-            Demo mode uses this browser’s local records and is not isolated from a real account. Do not enter real business or customer data in demo mode.
-          </p>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
