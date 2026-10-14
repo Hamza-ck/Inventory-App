@@ -12,9 +12,7 @@ import {
   Eye, 
   Edit3, 
   TrendingUp, 
-  DollarSign, 
-  User, 
-  FileText 
+  User 
 } from 'lucide-react'
 import { accDb } from '../lib/accountingDb'
 import { getLocalDateString, jsQuery } from '../lib/jsQuery'
