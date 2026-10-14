@@ -8,10 +8,12 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Role state: 'admin' (Me as an Admin - Full Data Entry) vs 'owner' (Owner - Read and Track Only)
-  const [role, setRoleState] = useState(() => {
-    return localStorage.getItem('tally_saas_role') || 'admin'
+  // A demo role is an explicit local choice; real sessions use the role loaded from Supabase.
+  const [demoRole, setDemoRoleState] = useState(() => {
+    const stored = localStorage.getItem('tally_saas_demo_role')
+    return stored === 'admin' || stored === 'owner' ? stored : null
   })
+  const [role, setRoleState] = useState('owner')
 
   useEffect(() => {
     // Initialize default accounting data (ledgers, materials, debtors with UIDs, vouchers)
@@ -22,6 +24,7 @@ export function AuthProvider({ children }) {
       if (data.session) {
         fetchProfileRole(data.session.user.id)
       } else {
+        setRoleState(demoRole || 'owner')
         setLoading(false)
       }
     })
@@ -31,6 +34,7 @@ export function AuthProvider({ children }) {
       if (newSession) {
         fetchProfileRole(newSession.user.id)
       } else {
+        setRoleState(demoRole || 'owner')
         setLoading(false)
       }
     })
@@ -45,36 +49,51 @@ export function AuthProvider({ children }) {
         .select('role')
         .eq('id', userId)
         .single()
-      if (!error && data?.role) {
-        // Map old roles if needed
-        const mappedRole = data.role === 'owner' ? 'owner' : 'admin'
-        setRoleState(mappedRole)
-        localStorage.setItem('tally_saas_role', mappedRole)
-      }
-    } catch {
-      // offline safe
+      if (error) throw error
+      // Unknown or missing profile roles must never grant administrator access.
+      setRoleState(data?.role === 'admin' ? 'admin' : 'owner')
+    } catch (err) {
+      console.warn('Could not load account role; using read-only access.', err)
+      setRoleState('owner')
     } finally {
       setLoading(false)
     }
   }
 
+  // Used only by the explicit local-demo buttons on the login screen.
   function setRole(newRole) {
-    setRoleState(newRole)
-    localStorage.setItem('tally_saas_role', newRole)
+    const demoRoleValue = newRole === 'admin' ? 'admin' : 'owner'
+    setDemoRoleState(demoRoleValue)
+    setRoleState(demoRoleValue)
+    localStorage.setItem('tally_saas_demo_role', demoRoleValue)
+  }
+
+  async function signOut() {
+    try {
+      await supabase.auth.signOut()
+    } finally {
+      setSession(null)
+      setDemoRoleState(null)
+      setRoleState('owner')
+      localStorage.removeItem('tally_saas_demo_role')
+      localStorage.removeItem('tally_saas_role')
+    }
   }
 
   const value = {
     session,
-    user: session?.user || { id: 'local-admin', email: 'admin@tallysaas.com', user_metadata: { full_name: 'Super Admin' } },
+    user: session?.user || (demoRole ? {
+      id: 'local-demo-user',
+      email: demoRole === 'admin' ? 'admin@demo.local' : 'owner@demo.local',
+      user_metadata: { full_name: demoRole === 'admin' ? 'Demo Admin' : 'Demo Owner' },
+    } : null),
     role,
     setRole,
     isAdmin: role === 'admin',
     isOwner: role === 'owner',
+    isDemoMode: !session && Boolean(demoRole),
     loading,
-    signOut: () => {
-      supabase.auth.signOut()
-      setSession(null)
-    },
+    signOut,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
