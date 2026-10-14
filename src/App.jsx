@@ -1,81 +1,99 @@
 import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider, useAuth } from './context/AuthContext'
+import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
-import QueueAutoSync from './components/QueueAutoSync'
 import Login from './pages/Login'
 
-// Route-level code splitting: the scan screen (needed by every user, every
-// visit) loads immediately. The heavier owner-only screens — charts, the
-// materials CRUD form, QR generation — only load if that route is hit.
-const ScanPage = lazy(() => import('./pages/ScanPage'))
-const OwnerDashboard = lazy(() => import('./pages/OwnerDashboard'))
+// Route-level code splitting
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const DayBookPage = lazy(() => import('./pages/DayBookPage'))
+const SalesPage = lazy(() => import('./pages/SalesPage'))
 const MaterialsPage = lazy(() => import('./pages/MaterialsPage'))
-const LabelsPage = lazy(() => import('./pages/LabelsPage'))
-const HistoryPage = lazy(() => import('./pages/HistoryPage'))
-
-function HomeRedirect() {
-  const { isOwner, loading } = useAuth()
-  if (loading) return <div className="centered">Loading...</div>
-  return <Navigate to={isOwner ? '/dashboard' : '/scan'} replace />
-}
+const PartiesPage = lazy(() => import('./pages/PartiesPage'))
+const BankingPage = lazy(() => import('./pages/BankingPage'))
+const TallyIntegrationPage = lazy(() => import('./pages/TallyIntegrationPage'))
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <QueueAutoSync />
-        <Suspense fallback={<div className="centered">Loading...</div>}>
+        <Suspense
+          fallback={
+            <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm font-semibold text-slate-300">Loading MEEMX ERP..</span>
+              </div>
+            </div>
+          }
+        >
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route
               path="/"
               element={
                 <ProtectedRoute>
-                  <HomeRedirect />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/scan"
-              element={
-                <ProtectedRoute>
-                  <ScanPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/history"
-              element={
-                <ProtectedRoute>
-                  <HistoryPage />
+                  <DashboardPage />
                 </ProtectedRoute>
               }
             />
             <Route
               path="/dashboard"
               element={
-                <ProtectedRoute requireRole="owner">
-                  <OwnerDashboard />
+                <ProtectedRoute>
+                  <DashboardPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/daybook"
+              element={
+                <ProtectedRoute>
+                  <DayBookPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/sales"
+              element={
+                <ProtectedRoute>
+                  <SalesPage />
                 </ProtectedRoute>
               }
             />
             <Route
               path="/materials"
               element={
-                <ProtectedRoute requireRole="owner">
+                <ProtectedRoute>
                   <MaterialsPage />
                 </ProtectedRoute>
               }
             />
             <Route
-              path="/labels"
+              path="/parties"
               element={
-                <ProtectedRoute requireRole="owner">
-                  <LabelsPage />
+                <ProtectedRoute>
+                  <PartiesPage />
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/banking"
+              element={
+                <ProtectedRoute>
+                  <BankingPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/tally"
+              element={
+                <ProtectedRoute>
+                  <TallyIntegrationPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
       </AuthProvider>

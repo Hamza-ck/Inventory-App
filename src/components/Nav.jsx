@@ -1,339 +1,251 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { 
-  QrCode, 
   LayoutDashboard, 
+  Receipt, 
+  BookOpen, 
   Boxes, 
-  Printer, 
+  Users, 
+  Landmark, 
+  FileSpreadsheet, 
+  PlusCircle, 
   LogOut, 
-  UserPlus,
-  Search,
-  FileText,
-  Megaphone,
-  History,
+  ShieldAlert, 
+  ShieldCheck, 
+  Menu, 
+  X,
+  CreditCard,
+  Building2,
+  TrendingUp,
   Sparkles
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { supabase } from '../lib/supabaseClient'
-import AddUserModal from './AddUserModal'
-import AdvanceSearchModal from './AdvanceSearchModal'
-import ProductReportModal from './ProductReportModal'
-import BatchModelAddModal from './BatchModelAddModal'
+import VoucherModal from './VoucherModal'
 
 export default function Nav() {
-  const { isOwner, signOut, user } = useAuth()
-  const [isAddUserOpen, setIsAddUserOpen] = useState(false)
-  const [isSearchOpen, setIsSearchOpen] = useState(false)
-  const [isReportOpen, setIsReportOpen] = useState(false)
-  const [isBatchOpen, setIsBatchOpen] = useState(false)
-  const [reportProduct, setReportProduct] = useState('')
-  const [materials, setMaterials] = useState([])
+  const { role, setRole, isAdmin, isOwner, signOut, user } = useAuth()
+  const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
-  // Load materials cache for global search and reports
-  useEffect(() => {
-    async function loadMaterials() {
-      const { data } = await supabase.from('materials').select('*').order('name')
-      if (data) setMaterials(data)
-    }
-    loadMaterials()
-  }, [])
+  const navItems = [
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/daybook', label: 'Day Book', icon: BookOpen },
+    { to: '/sales', label: 'Sales & Invoices', icon: Receipt },
+    { to: '/materials', label: 'Inventory', icon: Boxes },
+    { to: '/parties', label: 'Debtors & Creditors', icon: Users },
+    { to: '/banking', label: 'Cash & Loans', icon: Landmark },
+    { to: '/tally', label: 'Tally Import/Export', icon: FileSpreadsheet },
+  ]
 
-  // Keyboard shortcut Ctrl+K or / to open search
-  useEffect(() => {
-    function handleKeyDown(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault()
-        setIsSearchOpen((prev) => !prev)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
-  function handleOpenReportForProduct(productName) {
-    setReportProduct(productName || '')
-    setIsReportOpen(true)
+  function toggleRole() {
+    const nextRole = role === 'admin' ? 'owner' : 'admin'
+    setRole(nextRole)
   }
 
   return (
     <>
-      {/* Top Navigation Header */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs px-4 sm:px-6 py-2.5 no-print">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
-          {/* Logo & Brand */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm">
-              <QrCode className="w-4.5 h-4.5" />
-            </div>
-            <div>
-              <span className="font-bold text-slate-900 text-base tracking-tight block leading-tight">
-                Inventory Scan
-              </span>
-            </div>
+      <header className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-md no-print">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+          {/* Brand Logo & Name */}
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="lg:hidden p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+              aria-label="Toggle menu"
+            >
+              {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+
+            <NavLink to="/" className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/25">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="font-black text-base tracking-tight leading-tight block text-white">
+                  TallyFlow <span className="text-blue-400 font-medium text-xs">SaaS</span>
+                </span>
+                <span className="text-[10px] text-slate-400 tracking-wider uppercase font-semibold block leading-none">
+                  Accounting Cloud
+                </span>
+              </div>
+            </NavLink>
           </div>
 
-          {/* Desktop Nav Links & Global Search */}
-          <nav className="hidden md:flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
-            <NavLink
-              to="/scan"
-              className={({ isActive }) =>
-                `flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  isActive
-                    ? 'bg-white text-blue-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                }`
-              }
-            >
-              <QrCode className="w-3.5 h-3.5" />
-              <span>Scanner</span>
-            </NavLink>
-
-            <NavLink
-              to="/history"
-              className={({ isActive }) =>
-                `flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  isActive
-                    ? 'bg-white text-blue-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                }`
-              }
-            >
-              <History className="w-3.5 h-3.5" />
-              <span>History</span>
-            </NavLink>
-
-            {isOwner && (
-              <>
+          {/* Desktop Nav Items */}
+          <nav className="hidden lg:flex items-center gap-1">
+            {navItems.map((item) => {
+              const Icon = item.icon
+              return (
                 <NavLink
-                  to="/dashboard"
+                  key={item.to}
+                  to={item.to}
                   className={({ isActive }) =>
-                    `flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                       isActive
-                        ? 'bg-white text-blue-600 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                     }`
                   }
                 >
-                  <LayoutDashboard className="w-3.5 h-3.5" />
-                  <span>Dashboard</span>
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{item.label}</span>
                 </NavLink>
-
-                <NavLink
-                  to="/materials"
-                  className={({ isActive }) =>
-                    `flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      isActive
-                        ? 'bg-white text-blue-600 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                    }`
-                  }
-                >
-                  <Boxes className="w-3.5 h-3.5" />
-                  <span>Materials</span>
-                </NavLink>
-
-                <NavLink
-                  to="/labels"
-                  className={({ isActive }) =>
-                    `flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      isActive
-                        ? 'bg-white text-blue-600 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                    }`
-                  }
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Labels</span>
-                </NavLink>
-              </>
-            )}
-
-            {/* Advance Search Trigger Button (For BOTH Employee & Owner) */}
-            <button
-              type="button"
-              onClick={() => setIsSearchOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:text-blue-600 hover:bg-white transition-all ml-1"
-              title="Advance Search (Ctrl+K)"
-            >
-              <Search className="w-3.5 h-3.5 text-blue-600" />
-              <span>Advance Search</span>
-              <kbd className="hidden lg:inline-block font-mono text-[10px] bg-slate-200 text-slate-500 px-1.5 py-0.2 rounded">
-                ⌘K
-              </kbd>
-            </button>
-
-            {/* Batch Models Trigger */}
-            <button
-              type="button"
-              onClick={() => setIsBatchOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50/70 hover:bg-indigo-100/70 border border-indigo-200/60 transition-all ml-1"
-              title="Batch Model Upload (e.g. A6PRO-15, OP F33-13)"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Batch Models</span>
-            </button>
+              )
+            })}
           </nav>
 
-          {/* Right Action Tools */}
-          <div className="flex items-center gap-2">
-            {/* Quick Available Stock Report Tool for Owner */}
-            {isOwner && (
+          {/* Right Action Tools: + New Voucher, Role Switcher, Sign Out */}
+          <div className="flex items-center gap-2.5">
+            {/* Quick Voucher Button (Admin only) */}
+            {isAdmin ? (
               <button
                 type="button"
-                onClick={() => handleOpenReportForProduct('')}
-                className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-xs rounded-lg border border-amber-200 shadow-xs transition-colors"
-                title="Generate Marketing Available Stock Report (PDF / Copy)"
+                onClick={() => setIsVoucherModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-xl shadow-xs shadow-emerald-500/20 active:scale-95 transition-all"
+                title="Create Tally Voucher (F8 Sales, F9 Purchase, F6 Receipt, F5 Payment, F4 Contra)"
               >
-                <Megaphone className="w-3.5 h-3.5 text-amber-600" />
-                <span>Stock Report</span>
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">New Voucher</span>
+                <span className="sm:hidden">Entry</span>
               </button>
+            ) : (
+              <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-lg text-[11px] font-semibold">
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>Read & Track Only</span>
+              </span>
             )}
 
-            {isOwner && (
-              <button
-                type="button"
-                onClick={() => setIsAddUserOpen(true)}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs rounded-lg border border-blue-200 transition-colors"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Add User</span>
-              </button>
-            )}
-
-            <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-                isOwner
-                  ? 'bg-blue-50 text-blue-700 border-blue-200'
-                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            {/* Role Switcher Pill */}
+            <button
+              type="button"
+              onClick={toggleRole}
+              title={`Click to switch role (Current: ${role.toUpperCase()})`}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                isAdmin
+                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40 hover:bg-blue-500/30'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
               }`}
             >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  isOwner ? 'bg-blue-600' : 'bg-emerald-600'
-                }`}
-              />
-              {isOwner ? 'Owner' : 'Employee'}
-            </span>
+              {isAdmin ? (
+                <>
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Admin (Data Entry)</span>
+                </>
+              ) : (
+                <>
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Owner (Track Only)</span>
+                </>
+              )}
+            </button>
 
+            {/* Sign Out */}
             <button
               type="button"
               onClick={signOut}
               title="Sign out"
-              className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
             >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
+
+        {/* Mobile Dropdown Menu */}
+        {isMobileMenuOpen && (
+          <div className="lg:hidden border-t border-slate-800 bg-slate-900 px-4 py-3 space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      isActive
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-300 hover:bg-slate-800'
+                    }`
+                  }
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                </NavLink>
+              )
+            })}
+          </div>
+        )}
       </header>
 
-      {/* Mobile Bottom Navigation Bar (Including Search for Employee & Owner) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 py-1.5 px-3 flex items-center justify-around shadow-lg no-print">
+      {/* Mobile Bottom Navigation Bar */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 py-1 px-2 flex items-center justify-around shadow-2xl no-print">
         <NavLink
-          to="/scan"
+          to="/"
           className={({ isActive }) =>
-            `flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all flex-1 ${
-              isActive ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-700'
+            `flex flex-col items-center justify-center py-1 px-2 text-[10px] font-semibold flex-1 ${
+              isActive ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`
           }
         >
-          <QrCode className="w-5 h-5" />
-          <span>Scan</span>
+          <LayoutDashboard className="w-4 h-4 mb-0.5" />
+          <span>Dashboard</span>
         </NavLink>
 
-        {/* Mobile Search Button (Available for Employee & Owner) */}
-        <button
-          type="button"
-          onClick={() => setIsSearchOpen(true)}
-          className="flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-500 hover:text-blue-600 transition-all flex-1"
-        >
-          <Search className="w-5 h-5" />
-          <span>Search</span>
-        </button>
-
         <NavLink
-          to="/history"
+          to="/daybook"
           className={({ isActive }) =>
-            `flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all flex-1 ${
-              isActive ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-700'
+            `flex flex-col items-center justify-center py-1 px-2 text-[10px] font-semibold flex-1 ${
+              isActive ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'
             }`
           }
         >
-          <History className="w-5 h-5" />
-          <span>History</span>
+          <BookOpen className="w-4 h-4 mb-0.5" />
+          <span>Day Book</span>
         </NavLink>
 
-        {isOwner && (
-          <>
-            <NavLink
-              to="/dashboard"
-              className={({ isActive }) =>
-                `flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all flex-1 ${
-                  isActive ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-700'
-                }`
-              }
-            >
-              <LayoutDashboard className="w-5 h-5" />
-              <span>Dashboard</span>
-            </NavLink>
-
-            <NavLink
-              to="/materials"
-              className={({ isActive }) =>
-                `flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all flex-1 ${
-                  isActive ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-700'
-                }`
-              }
-            >
-              <Boxes className="w-5 h-5" />
-              <span>Materials</span>
-            </NavLink>
-
-            <NavLink
-              to="/labels"
-              className={({ isActive }) =>
-                `flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all flex-1 ${
-                  isActive ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-700'
-                }`
-              }
-            >
-              <Printer className="w-5 h-5" />
-              <span>Labels</span>
-            </NavLink>
-          </>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setIsVoucherModalOpen(true)}
+            className="flex flex-col items-center justify-center -mt-4 bg-gradient-to-tr from-emerald-500 to-teal-600 text-white w-10 h-10 rounded-full shadow-lg shadow-emerald-600/40"
+          >
+            <PlusCircle className="w-5 h-5" />
+          </button>
         )}
+
+        <NavLink
+          to="/sales"
+          className={({ isActive }) =>
+            `flex flex-col items-center justify-center py-1 px-2 text-[10px] font-semibold flex-1 ${
+              isActive ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`
+          }
+        >
+          <Receipt className="w-4 h-4 mb-0.5" />
+          <span>Sales</span>
+        </NavLink>
+
+        <NavLink
+          to="/materials"
+          className={({ isActive }) =>
+            `flex flex-col items-center justify-center py-1 px-2 text-[10px] font-semibold flex-1 ${
+              isActive ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`
+          }
+        >
+          <Boxes className="w-4 h-4 mb-0.5" />
+          <span>Inventory</span>
+        </NavLink>
       </nav>
 
-      {/* Global Add User Modal */}
-      <AddUserModal
-        isOpen={isAddUserOpen}
-        onClose={() => setIsAddUserOpen(false)}
-      />
-
-      {/* Advance Search Modal (Available for Employee & Owner) */}
-      <AdvanceSearchModal
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-        materials={materials}
-        onSelectProductForReport={(pName) => handleOpenReportForProduct(pName)}
-      />
-
-      {/* Product Report Modal */}
-      <ProductReportModal
-        isOpen={isReportOpen}
-        onClose={() => setIsReportOpen(false)}
-        materials={materials}
-        initialProductName={reportProduct}
-      />
-
-      {/* Batch Model Upload Modal */}
-      <BatchModelAddModal
-        isOpen={isBatchOpen}
-        onClose={() => setIsBatchOpen(false)}
-        materials={materials}
+      {/* Global Quick Voucher Modal */}
+      <VoucherModal
+        isOpen={isVoucherModalOpen}
+        onClose={() => setIsVoucherModalOpen(false)}
         onSuccess={() => {
-          loadMaterials()
-          window.location.reload()
+          // Trigger refresh event across pages
+          window.dispatchEvent(new Event('accounting-data-updated'))
         }}
       />
     </>

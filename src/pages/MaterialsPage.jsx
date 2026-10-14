@@ -14,24 +14,31 @@ import {
   FileSpreadsheet, 
   Download, 
   Upload, 
-  AlertCircle, 
-  Check, 
-  FileText,
-  FileDown,
-  RotateCcw,
-  Megaphone,
-  Sparkles
+  DollarSign,
+  TrendingUp,
+  History,
+  Layers,
+  Check
 } from 'lucide-react'
-import { supabase } from '../lib/supabaseClient'
-import { advancedFilterMaterials } from '../lib/searchUtils'
+import { accDb } from '../lib/accountingDb'
+import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
-import ProductReportModal from '../components/ProductReportModal'
-import BatchModelAddModal from '../components/BatchModelAddModal'
 
-const emptyForm = { sku: '', name: '', model: '', unit: 'pcs', current_qty: 0, reorder_threshold: 5 }
+const emptyForm = {
+  sku: '',
+  name: '',
+  category: 'Raw Materials',
+  unit: 'pcs',
+  purchase_rate: 100,
+  sales_rate: 140,
+  current_qty: 0,
+  reorder_threshold: 10,
+}
 
 export default function MaterialsPage() {
+  const { isAdmin, isOwner } = useAuth()
   const [materials, setMaterials] = useState([])
+  const [vouchers, setVouchers] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
@@ -39,37 +46,61 @@ export default function MaterialsPage() {
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('all')
   const [filterLowStockOnly, setFilterLowStockOnly] = useState(false)
 
-  // Marketing Report Modal State
-  const [isReportOpen, setIsReportOpen] = useState(false)
+  // Material Movements Modal
+  const [movementMaterial, setMovementMaterial] = useState(null)
+  const [isMovementModalOpen, setIsMovementModalOpen] = useState(false)
 
-  // Batch Model Stock Add Modal State
-  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
-
-  // Erase All Quantities Safety Modal State
-  const [isEraseModalOpen, setIsEraseModalOpen] = useState(false)
-  const [erasing, setErasing] = useState(false)
-  const [toastMessage, setToastMessage] = useState(null)
-
-  // Excel Bulk Import States
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
-  const [importRows, setImportRows] = useState([])
-  const [importErrorsCount, setImportErrorsCount] = useState(0)
-  const [importWarningsCount, setImportWarningsCount] = useState(0)
-  const [importing, setImporting] = useState(false)
-  const [importSummary, setImportSummary] = useState(null)
   const fileInputRef = useRef(null)
 
   useEffect(() => {
     load()
+    function handleUpdate() { load() }
+    window.addEventListener('accounting-data-updated', handleUpdate)
+    return () => window.removeEventListener('accounting-data-updated', handleUpdate)
   }, [])
 
   async function load() {
     setLoading(true)
-    const { data, error } = await supabase.from('materials').select('*').order('name')
-    if (!error) setMaterials(data || [])
+    const list = await accDb.materials.toArray()
+    const vchs = await accDb.vouchers.toArray()
+    setMaterials(list)
+    setVouchers(vchs)
     setLoading(false)
+  }
+
+  // Categories list
+  const categories = useMemo(() => {
+    const set = new Set(materials.map((m) => m.category || 'General').filter(Boolean))
+    return ['all', ...Array.from(set)]
+  }, [materials])
+
+  // Filtered materials
+  const filtered = useMemo(() => {
+    return materials.filter((m) => {
+      const q = search.toLowerCase().trim()
+      const matchesSearch = !q || m.name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q)
+      const matchesCategory = categoryFilter === 'all' || (m.category || 'General') === categoryFilter
+      const matchesLowStock = !filterLowStockOnly || (Number(m.current_qty) <= Number(m.reorder_threshold))
+      return matchesSearch && matchesCategory && matchesLowStock
+    })
+  }, [materials, search, categoryFilter, filterLowStockOnly])
+
+  // Inventory Totals
+  const totalStockItems = materials.length
+  const totalValuation = materials.reduce((acc, m) => acc + (Number(m.current_qty) || 0) * (Number(m.purchase_rate) || 0), 0)
+  const lowStockCount = materials.filter((m) => Number(m.current_qty) <= Number(m.reorder_threshold)).length
+
+  function startAdd() {
+    setEditingId(null)
+    setForm({
+      ...emptyForm,
+      sku: `MAT-${Date.now().toString().slice(-4)}`,
+    })
+    setError(null)
+    setIsModalOpen(true)
   }
 
   function startEdit(material) {
@@ -77,997 +108,583 @@ export default function MaterialsPage() {
     setForm({
       sku: material.sku,
       name: material.name,
-      model: material.model || '',
+      category: material.category || 'General',
       unit: material.unit || 'pcs',
-      current_qty: material.current_qty,
-      reorder_threshold: material.reorder_threshold ?? 0,
+      purchase_rate: material.purchase_rate || 0,
+      sales_rate: material.sales_rate || 0,
+      current_qty: material.current_qty || 0,
+      reorder_threshold: material.reorder_threshold || 10,
     })
-    setIsModalOpen(true)
-  }
-
-  function startAdd() {
-    setEditingId(null)
-    setForm(emptyForm)
     setError(null)
     setIsModalOpen(true)
   }
 
-  function closeModal() {
-    setIsModalOpen(false)
-    setEditingId(null)
-    setForm(emptyForm)
-    setError(null)
-  }
-
-  // --- Reset / Erase All Quantities to 0 ---
-  async function handleEraseAllQuantities() {
-    setErasing(true)
-    try {
-      const { error: updateError } = await supabase
-        .from('materials')
-        .update({ current_qty: 0 })
-        .not('id', 'is', null)
-
-      if (updateError) throw updateError
-
-      setIsEraseModalOpen(false)
-      setToastMessage('✓ Successfully reset stock quantities of all products to 0.')
-      setTimeout(() => setToastMessage(null), 4000)
-      load()
-    } catch (err) {
-      alert(`Could not reset quantities: ${err.message}`)
-    } finally {
-      setErasing(false)
-    }
-  }
-
-  async function handleSubmit(e) {
+  async function handleSave(e) {
     e.preventDefault()
-    setError(null)
-    setSaving(true)
-
-    const payload = {
-      sku: form.sku.trim(),
-      name: form.name.trim(),
-      model: form.model.trim() || null,
-      unit: form.unit.trim() || 'pcs',
-      current_qty: Number(form.current_qty) || 0,
-      reorder_threshold: Number(form.reorder_threshold) || 0,
-    }
-
-    const result = editingId
-      ? await supabase.from('materials').update(payload).eq('id', editingId)
-      : await supabase.from('materials').insert(payload)
-
-    setSaving(false)
-
-    if (result.error) {
-      setError(result.error.message)
+    if (isOwner) return
+    if (!form.sku.trim() || !form.name.trim()) {
+      setError('SKU and Material Name are required')
       return
     }
 
-    closeModal()
+    setSaving(true)
+    setError(null)
+
+    try {
+      if (editingId) {
+        await accDb.materials.update(editingId, {
+          ...form,
+          purchase_rate: Number(form.purchase_rate) || 0,
+          sales_rate: Number(form.sales_rate) || 0,
+          current_qty: Number(form.current_qty) || 0,
+          reorder_threshold: Number(form.reorder_threshold) || 0,
+        })
+      } else {
+        await accDb.materials.add({
+          ...form,
+          purchase_rate: Number(form.purchase_rate) || 0,
+          sales_rate: Number(form.sales_rate) || 0,
+          current_qty: Number(form.current_qty) || 0,
+          reorder_threshold: Number(form.reorder_threshold) || 0,
+          created_at: new Date().toISOString(),
+        })
+      }
+
+      setSaving(false)
+      setIsModalOpen(false)
+      load()
+    } catch (err) {
+      setError(err.message || 'Failed to save material')
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!isAdmin) return
+    if (!confirm('Are you sure you want to delete this material?')) return
+    await accDb.materials.delete(id)
     load()
   }
 
-  async function handleDelete(id, name) {
-    if (!confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) return
-    const { error } = await supabase.from('materials').delete().eq('id', id)
-    if (error) alert(`Could not delete: ${error.message}`)
-    else load()
-  }
+  // Export to Excel
+  function exportMaterialsExcel() {
+    const rows = materials.map((m) => ({
+      'SKU / Item Code': m.sku,
+      'Material Name': m.name,
+      Category: m.category || 'General',
+      Unit: m.unit || 'pcs',
+      'Cost Rate (₹)': Number(m.purchase_rate || 0),
+      'Sales Rate (₹)': Number(m.sales_rate || 0),
+      'Current Stock': Number(m.current_qty || 0),
+      'Reorder Level': Number(m.reorder_threshold || 0),
+      'Stock Valuation (₹)': Number(m.current_qty || 0) * Number(m.purchase_rate || 0),
+    }))
 
-  // --- Sample & Template Download Functions ---
-
-  function downloadSampleFile() {
-    const sampleData = [
-      {
-        sku: 'SKU-2MM-V40E',
-        name: '2MM',
-        model: 'VIVO V40 E',
-        unit: 'pcs',
-        current_qty: 50,
-        reorder_threshold: 10,
-      },
-      {
-        sku: 'SKU-2MM-V29',
-        name: '2MM',
-        model: 'VIVO V29',
-        unit: 'pcs',
-        current_qty: 30,
-        reorder_threshold: 10,
-      },
-      {
-        sku: 'SKU-2MM-OP15',
-        name: '2MM',
-        model: 'OPPO A15C',
-        unit: 'pcs',
-        current_qty: 25,
-        reorder_threshold: 5,
-      },
-      {
-        sku: 'SKU-MAG-IP15P',
-        name: 'Clear Magsafe',
-        model: 'IPHONE 15 PRO',
-        unit: 'pcs',
-        current_qty: 40,
-        reorder_threshold: 10,
-      },
-    ]
-
-    const ws = XLSX.utils.json_to_sheet(sampleData)
-    ws['!cols'] = [
-      { wch: 18 },
-      { wch: 22 },
-      { wch: 22 },
-      { wch: 10 },
-      { wch: 14 },
-      { wch: 18 },
-    ]
+    const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Sample_Inventory')
-    XLSX.writeFile(wb, 'inventory_sample_materials.xlsx')
+    XLSX.utils.book_append_sheet(wb, ws, 'Materials_Inventory')
+    XLSX.writeFile(wb, `Materials_Stock_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
-  function downloadBlankTemplate() {
-    const templateData = [
-      {
-        sku: '',
-        name: '',
-        model: '',
-        unit: 'pcs',
-        current_qty: 0,
-        reorder_threshold: 5,
-      },
-    ]
-
-    const ws = XLSX.utils.json_to_sheet(templateData)
-    ws['!cols'] = [
-      { wch: 18 },
-      { wch: 28 },
-      { wch: 18 },
-      { wch: 10 },
-      { wch: 14 },
-      { wch: 18 },
-    ]
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Materials_Template')
-    XLSX.writeFile(wb, 'inventory_blank_template.xlsx')
-  }
-
-  function handleFileChange(e) {
+  // Import from Excel
+  async function handleExcelUpload(e) {
+    if (isOwner) return
     const file = e.target.files?.[0]
     if (!file) return
 
-    setImportSummary(null)
-    const reader = new FileReader()
+    try {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
 
-    reader.onload = (evt) => {
-      try {
-        const buffer = evt.target.result
-        const workbook = XLSX.read(buffer, { type: 'array' })
-        const sheetName = workbook.SheetNames[0]
-        const worksheet = workbook.Sheets[sheetName]
-        const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: '' })
-
-        if (rawJson.length === 0) {
-          alert('The selected Excel file is empty.')
-          return
+      let added = 0
+      for (const r of rows) {
+        const name = r['Material Name'] || r['Item Name'] || r['Name']
+        const sku = r['SKU / Item Code'] || r['SKU'] || r['Item Code'] || `MAT-${Date.now().toString().slice(-4)}`
+        if (name) {
+          await accDb.materials.add({
+            sku: String(sku).trim(),
+            name: String(name).trim(),
+            category: r['Category'] || 'General',
+            unit: r['Unit'] || 'pcs',
+            purchase_rate: parseFloat(r['Cost Rate (₹)'] || r['Purchase Rate'] || 100) || 100,
+            sales_rate: parseFloat(r['Sales Rate (₹)'] || r['Sales Rate'] || 140) || 140,
+            current_qty: parseFloat(r['Current Stock'] || r['Qty'] || 0) || 0,
+            reorder_threshold: parseFloat(r['Reorder Level'] || 10) || 10,
+          })
+          added++
         }
+      }
 
-        const seenSkus = new Map()
-        let errCount = 0
-        let warnCount = 0
+      alert(`Successfully imported ${added} materials!`)
+      load()
+    } catch (err) {
+      alert('Failed to import Excel: ' + err.message)
+    }
+  }
 
-        const parsed = rawJson.map((row, index) => {
-          const getVal = (possibleKeys) => {
-            for (const key of Object.keys(row)) {
-              const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '')
-              if (possibleKeys.includes(normalized)) {
-                return String(row[key]).trim()
-              }
-            }
-            return ''
-          }
-
-          const sku = getVal(['sku', 'skuid', 'barcode', 'itemcode', 'code'])
-          const name = getVal(['name', 'materialname', 'productname', 'itemname', 'title'])
-          const model = getVal(['model', 'variant', 'type', 'spec'])
-          const unit = getVal(['unit', 'uom', 'measure']) || 'pcs'
-          const rawQty = getVal(['currentqty', 'qty', 'quantity', 'stock', 'initialqty'])
-          const rawThreshold = getVal(['reorderthreshold', 'threshold', 'alertmin', 'minqty', 'reorder'])
-
-          const current_qty = rawQty === '' ? 0 : Number(rawQty) || 0
-          const reorder_threshold = rawThreshold === '' ? 0 : Number(rawThreshold) || 0
-
-          const issues = []
-          let isError = false
-          let isWarning = false
-
-          if (!sku) {
-            issues.push('Missing SKU')
-            isError = true
-          }
-          if (!name) {
-            issues.push('Missing Name')
-            isError = true
-          }
-
-          if (sku) {
-            if (seenSkus.has(sku)) {
-              issues.push(`Duplicate SKU in file (row ${seenSkus.get(sku) + 1} & row ${index + 1})`)
-              isWarning = true
-              warnCount++
-            } else {
-              seenSkus.set(sku, index)
-            }
-          }
-
-          if (isError) errCount++
-
-          return {
-            rowNum: index + 1,
-            sku,
-            name,
-            model,
-            unit,
-            current_qty,
-            reorder_threshold,
-            isError,
-            isWarning,
-            issues,
+  // Material Movement History from vouchers
+  const materialMovements = useMemo(() => {
+    if (!movementMaterial) return []
+    const moves = []
+    vouchers.forEach((v) => {
+      if (Array.isArray(v.items) && v.items.length > 0) {
+        v.items.forEach((it) => {
+          if (it.sku === movementMaterial.sku || it.name === movementMaterial.name || it.material_id === movementMaterial.id) {
+            moves.push({
+              voucher_no: v.voucher_no,
+              voucher_type: v.voucher_type,
+              date: v.date,
+              party_name: v.party_name,
+              qty: it.qty,
+              rate: it.rate,
+              amount: it.amount || it.qty * it.rate,
+            })
           }
         })
-
-        setImportRows(parsed)
-        setImportErrorsCount(errCount)
-        setImportWarningsCount(warnCount)
-      } catch (err) {
-        alert(`Failed to read Excel file: ${err.message}`)
-      }
-    }
-
-    reader.readAsArrayBuffer(file)
-  }
-
-  async function handleConfirmImport() {
-    const validRows = importRows.filter((r) => !r.isError)
-    if (validRows.length === 0) {
-      alert('No valid rows found to import.')
-      return
-    }
-
-    setImporting(true)
-    const existingSkus = new Set(materials.map((m) => m.sku))
-
-    let addedCount = 0
-    let updatedCount = 0
-
-    const payloads = validRows.map((r) => {
-      if (existingSkus.has(r.sku)) {
-        updatedCount++
-      } else {
-        addedCount++
-      }
-      return {
-        sku: r.sku,
-        name: r.name,
-        model: r.model || null,
-        unit: r.unit || 'pcs',
-        current_qty: r.current_qty,
-        reorder_threshold: r.reorder_threshold,
       }
     })
-
-    const { error: upsertError } = await supabase
-      .from('materials')
-      .upsert(payloads, { onConflict: 'sku' })
-
-    setImporting(false)
-
-    if (upsertError) {
-      alert(`Import failed: ${upsertError.message}`)
-      return
-    }
-
-    const skipped = importRows.filter((r) => r.isError)
-
-    setImportSummary({
-      added: addedCount,
-      updated: updatedCount,
-      skippedCount: skipped.length,
-      skippedRows: skipped,
-    })
-
-    load()
-  }
-
-  function closeImportModal() {
-    setIsImportModalOpen(false)
-    setImportRows([])
-    setImportSummary(null)
-    setImportErrorsCount(0)
-    setImportWarningsCount(0)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  const filtered = useMemo(() => {
-    return advancedFilterMaterials(materials, search, {
-      statusFilter: filterLowStockOnly ? 'low' : 'all',
-    })
-  }, [materials, search, filterLowStockOnly])
+    return moves.sort((a, b) => new Date(b.date) - new Date(a.date))
+  }, [movementMaterial, vouchers])
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16">
       <Nav />
 
-      <main className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-24 flex-1">
-        {/* Header and Action Buttons */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
-              <Boxes className="w-7 h-7 text-blue-600" />
-              Materials Inventory
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Manage product catalogs, QR barcodes, model variants & threshold alerts
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
+                <Boxes className="w-7 h-7 text-purple-400" />
+                <span>Materials Stock & Valuation</span>
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                Pure Material-Wise (No Models)
+              </span>
+            </div>
+            <p className="text-xs sm:text-sm text-slate-400 mt-1">
+              Material-wise stock levels, cost valuation, reorder alerts, and movement tracking.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-            {/* Marketing Report Header Button */}
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setIsReportOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-xs sm:text-sm rounded-xl border border-amber-200 shadow-xs transition-all"
-              title="Generate Marketing Available Stock Report (PDF / Copy)"
+              onClick={exportMaterialsExcel}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
             >
-              <Megaphone className="w-4 h-4 text-amber-600" />
-              <span>Available Stock Report</span>
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span>Export Stock</span>
             </button>
 
-            {/* Import from Excel Button */}
-            <button
-              type="button"
-              onClick={() => setIsImportModalOpen(true)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-sm transition-all"
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              <span>Import Excel</span>
-            </button>
-
-            {/* Batch Model Qty Add Button */}
-            <button
-              type="button"
-              onClick={() => setIsBatchModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-sm shadow-indigo-500/20 transition-all cursor-pointer"
-              title="Add stock in bulk by pasting model names (e.g. A6PRO-15, OP F33-13)"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Batch Model Add</span>
-            </button>
-
-            {/* Single Add SKU Button */}
-            <button
-              type="button"
-              onClick={startAdd}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-sm transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add SKU</span>
-            </button>
-
-            {/* Erase / Reset All Quantities to 0 Button */}
-            <button
-              type="button"
-              onClick={() => setIsEraseModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-rose-50 text-rose-700 hover:text-rose-800 font-semibold text-xs sm:text-sm rounded-xl border border-rose-200 shadow-xs transition-all"
-              title="Erase / Reset all stock quantities to 0"
-            >
-              <RotateCcw className="w-4 h-4 text-rose-600" />
-              <span>Reset All Qty</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Success Toast Notification */}
-        <AnimatePresence>
-          {toastMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs sm:text-sm font-semibold mb-5 flex items-center justify-between shadow-xs"
-            >
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                <span>{toastMessage}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setToastMessage(null)}
-                className="p-1 text-emerald-600 hover:text-emerald-900"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Search & Filter Bar */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
-          <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search with advance multi-keyword logic by Product Name, Model, or SKU..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 shadow-xs"
-            />
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setFilterLowStockOnly(!filterLowStockOnly)}
-            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold border transition-all flex items-center justify-center gap-2 ${
-              filterLowStockOnly
-                ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
-                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-            }`}
-          >
-            <AlertTriangle className="w-4 h-4" />
-            <span>Low Stock Alert</span>
-          </button>
-        </div>
-
-        {/* Modal for Single Add / Edit */}
-        <AnimatePresence>
-          {isModalOpen && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-lg shadow-2xl border border-slate-200"
-              >
-                <div className="flex items-start justify-between mb-5">
-                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                    <Package className="w-5 h-5 text-blue-600" />
-                    {editingId ? 'Edit Material SKU' : 'Register New Material'}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      SKU (QR Code identifier) *
-                    </label>
-                    <input
-                      value={form.sku}
-                      onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                      placeholder="e.g. ITEM-SHIRT-001"
-                      required
-                      disabled={!!editingId}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Material / Product Name *
-                    </label>
-                    <input
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      placeholder="e.g. Cotton Crew Neck T-Shirt"
-                      required
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Model / Variant
-                      </label>
-                      <input
-                        value={form.model}
-                        onChange={(e) => setForm({ ...form, model: e.target.value })}
-                        placeholder="e.g. Black / XL"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Unit</label>
-                      <input
-                        value={form.unit}
-                        onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                        placeholder="pcs, kg, box"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Current Quantity
-                      </label>
-                      <input
-                        type="number"
-                        value={form.current_qty}
-                        onChange={(e) => setForm({ ...form, current_qty: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Reorder Threshold
-                      </label>
-                      <input
-                        type="number"
-                        value={form.reorder_threshold}
-                        onChange={(e) => setForm({ ...form, reorder_threshold: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                      />
-                    </div>
-                  </div>
-
-                  {error && (
-                    <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-medium">
-                      {error}
-                    </div>
-                  )}
-
-                  <div className="flex gap-2.5 pt-3">
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-600/30 transition-all disabled:opacity-50"
-                    >
-                      {saving ? 'Saving...' : editingId ? 'Update Material' : 'Create Material'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={closeModal}
-                      className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm rounded-xl"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-
-        {/* Modal for Reset / Erase All Quantities */}
-        <AnimatePresence>
-          {isEraseModalOpen && (
-            <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-md shadow-2xl border border-rose-200 text-center"
-              >
-                <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4 border border-rose-100 shadow-sm">
-                  <RotateCcw className="w-7 h-7" />
-                </div>
-
-                <h3 className="text-lg font-bold text-slate-900 mb-2">
-                  Erase All Stock Quantities?
-                </h3>
-
-                <p className="text-xs text-slate-500 mb-6 leading-relaxed">
-                  This action will set the current stock quantity of <strong className="text-slate-800">ALL {materials.length} products</strong> to <strong>0</strong>.
-                  <br />
-                  Product names, model variants and SKUs will remain intact.
-                </p>
-
-                <div className="flex gap-2.5">
-                  <button
-                    type="button"
-                    onClick={handleEraseAllQuantities}
-                    disabled={erasing}
-                    className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-rose-600/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {erasing ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        <span>Resetting to 0...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-4 h-4" />
-                        <span>Yes, Reset All to 0</span>
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsEraseModalOpen(false)}
-                    className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs sm:text-sm rounded-xl transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-
-        {/* Modal for Excel Bulk Import */}
-        <AnimatePresence>
-          {isImportModalOpen && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh]"
-              >
-                {/* Header */}
-                <div className="flex items-start justify-between mb-4 shrink-0">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
-                      <FileSpreadsheet className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-slate-900">Bulk Import Materials from Excel</h3>
-                      <p className="text-xs text-slate-500">Upload a spreadsheet (.xlsx, .xls, or .csv) to batch register or update products</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={closeImportModal}
-                    className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                {/* Body Content */}
-                <div className="overflow-y-auto pr-1 flex-1 space-y-4">
-                  {/* Download Template & Sample Banner */}
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
-                    <div className="flex items-center gap-2.5">
-                      <FileText className="w-5 h-5 text-emerald-600 shrink-0" />
-                      <div className="text-xs">
-                        <span className="font-bold text-slate-800 block text-sm">Download Spreadsheet Template & Samples</span>
-                        <span className="text-slate-500">Expected columns: sku, name, model, unit, current_qty, reorder_threshold</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={downloadSampleFile}
-                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold text-xs rounded-xl border border-emerald-200 flex items-center gap-1.5 transition-colors"
-                      >
-                        <FileDown className="w-3.5 h-3.5" />
-                        <span>Sample File (.xlsx)</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={downloadBlankTemplate}
-                        className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl border border-slate-300 shadow-xs flex items-center gap-1.5 transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Blank Template</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* File Upload Area */}
-                  {importRows.length === 0 && !importSummary && (
-                    <div
-                      onClick={() => fileInputRef.current?.click()}
-                      className="border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50/60 hover:bg-emerald-50/20 rounded-2xl p-8 text-center cursor-pointer transition-all flex flex-col items-center justify-center"
-                    >
-                      <Upload className="w-10 h-10 text-emerald-600 mb-2.5" />
-                      <p className="font-bold text-slate-800 text-sm mb-1">Click to choose your Excel file</p>
-                      <p className="text-xs text-slate-500">Supports .xlsx, .xls and .csv files</p>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".xlsx, .xls, .csv"
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
-                    </div>
-                  )}
-
-                  {/* Post-Import Summary */}
-                  {importSummary && (
-                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-3">
-                      <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                        <span>
-                          Import Complete: {importSummary.added} added, {importSummary.updated} updated, {importSummary.skippedCount} skipped.
-                        </span>
-                      </div>
-
-                      {importSummary.skippedRows.length > 0 && (
-                        <div className="mt-2 text-xs bg-white p-3 rounded-xl border border-emerald-100">
-                          <p className="font-semibold text-slate-700 mb-1">Skipped Rows:</p>
-                          <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                            {importSummary.skippedRows.map((sr, idx) => (
-                              <li key={idx}>
-                                Row {sr.rowNum}: {sr.issues.join(', ')} ({sr.sku || 'No SKU'} - {sr.name || 'No Name'})
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Preview Table */}
-                  {importRows.length > 0 && !importSummary && (
-                    <div>
-                      {/* Metric Banner */}
-                      <div className="flex items-center justify-between mb-2 text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-800">
-                            Preview: {importRows.length} total rows
-                          </span>
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold">
-                            {importRows.length - importErrorsCount} valid
-                          </span>
-                          {importErrorsCount > 0 && (
-                            <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded-full font-bold">
-                              {importErrorsCount} errors
-                            </span>
-                          )}
-                          {importWarningsCount > 0 && (
-                            <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full font-bold">
-                              {importWarningsCount} warnings
-                            </span>
-                          )}
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setImportRows([])
-                            if (fileInputRef.current) fileInputRef.current.value = ''
-                          }}
-                          className="text-slate-500 hover:text-slate-800 underline text-xs"
-                        >
-                          Choose another file
-                        </button>
-                      </div>
-
-                      <div className="border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 border-b border-slate-200">
-                            <tr>
-                              <th className="p-2 w-12">#</th>
-                              <th className="p-2">SKU *</th>
-                              <th className="p-2">Name *</th>
-                              <th className="p-2">Model</th>
-                              <th className="p-2">Unit</th>
-                              <th className="p-2 text-right">Qty</th>
-                              <th className="p-2 text-right">Alert Min</th>
-                              <th className="p-2">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {importRows.map((r) => (
-                              <tr
-                                key={r.rowNum}
-                                className={`${
-                                  r.isError
-                                    ? 'bg-rose-50/70 text-rose-900'
-                                    : r.isWarning
-                                    ? 'bg-amber-50/50 text-slate-800'
-                                    : 'hover:bg-slate-50 text-slate-800'
-                                }`}
-                              >
-                                <td className="p-2 font-mono text-slate-400">{r.rowNum}</td>
-                                <td className="p-2 font-mono font-bold">
-                                  {r.sku || <span className="text-rose-600 font-sans italic">Missing</span>}
-                                </td>
-                                <td className="p-2 font-medium">
-                                  {r.name || <span className="text-rose-600 italic">Missing</span>}
-                                </td>
-                                <td className="p-2 text-slate-500">{r.model || '—'}</td>
-                                <td className="p-2 text-slate-500">{r.unit}</td>
-                                <td className="p-2 text-right font-semibold">{r.current_qty}</td>
-                                <td className="p-2 text-right text-slate-500">{r.reorder_threshold}</td>
-                                <td className="p-2">
-                                  {r.isError ? (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600">
-                                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                                      {r.issues.join(', ')}
-                                    </span>
-                                  ) : r.isWarning ? (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600">
-                                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                                      Duplicate
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-                                      <Check className="w-3.5 h-3.5" /> Ready
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Footer Controls */}
-                <div className="flex gap-2.5 pt-4 border-t border-slate-100 mt-4 shrink-0">
-                  {importRows.length > 0 && !importSummary ? (
-                    <button
-                      type="button"
-                      onClick={handleConfirmImport}
-                      disabled={importing || importRows.length - importErrorsCount === 0}
-                      className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md shadow-emerald-600/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {importing ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>Importing to Database...</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>
-                            Confirm Import ({importRows.length - importErrorsCount} valid items)
-                          </span>
-                        </>
-                      )}
-                    </button>
-                  ) : null}
-
-                  <button
-                    type="button"
-                    onClick={closeImportModal}
-                    className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm rounded-xl transition-colors"
-                  >
-                    {importSummary ? 'Done' : 'Cancel'}
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-
-        {/* Materials Cards List */}
-        {loading ? (
-          <div className="py-16 text-center text-slate-400">
-            <div className="w-8 h-8 border-3 border-slate-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-xs font-medium">Loading materials inventory...</p>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
-            <Boxes className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="font-bold text-slate-800 text-base">No materials found</p>
-            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-              {search
-                ? 'No items match your search criteria. Try a different keyword.'
-                : 'Get started by clicking "Add SKU" or "Import Excel" above.'}
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((m) => {
-              const qty = Number(m.current_qty) || 0
-              const threshold = Number(m.reorder_threshold ?? 0)
-              const isOut = qty <= 0
-              const isLow = !isOut && qty <= threshold
-
-              return (
-                <motion.div
-                  key={m.id}
-                  layout
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+            {isAdmin && (
+              <>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleExcelUpload}
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
                 >
-                  <div>
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <h4 className="font-bold text-slate-900 text-base leading-tight truncate flex-1">
-                        {m.name}
-                      </h4>
-                      <span
-                        className={`px-2.5 py-1 rounded-full text-xs font-bold shrink-0 ${
-                          isOut
-                            ? 'bg-rose-50 text-rose-800 border border-rose-200'
-                            : isLow
-                            ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                            : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                        }`}
-                      >
-                        {isOut ? '🚫 Out of Stock' : isLow ? '⚠️ Low' : '✓ In Stock'}
-                      </span>
-                    </div>
+                  <Upload className="w-4 h-4 text-blue-400" />
+                  <span>Import Excel</span>
+                </button>
 
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mb-4">
-                      <span className="font-mono bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-slate-700">
-                        {m.sku}
-                      </span>
-                      {m.model && (
-                        <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-semibold">
-                          {m.model}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-100">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <div className="text-[10px] uppercase font-bold text-slate-400">Current Qty</div>
-                        <div className="text-xl font-black text-slate-900">
-                          {qty.toLocaleString()}{' '}
-                          <span className="text-xs font-semibold text-slate-500">{m.unit || 'pcs'}</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-[10px] uppercase font-bold text-slate-400">Min Alert</div>
-                        <div className="text-xs font-bold text-slate-600">
-                          ≤ {threshold} {m.unit || 'pcs'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => startEdit(m)}
-                        className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" /> Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(m.id, m.name)}
-                        className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                        title="Delete Material"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              )
-            })}
+                <button
+                  type="button"
+                  onClick={startAdd}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-600/30 flex items-center gap-1.5 transition-all active:scale-95"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Add Material</span>
+                </button>
+              </>
+            )}
           </div>
-        )}
+        </div>
+
+        {/* 3 Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Total Stock Items</span>
+            <div className="text-2xl font-black text-white">{totalStockItems}</div>
+            <div className="text-[11px] text-slate-400 mt-1">Material SKU catalog count</div>
+          </div>
+
+          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
+            <span className="text-xs font-bold text-purple-400 uppercase tracking-wider block mb-1">Total Stock Valuation</span>
+            <div className="text-2xl font-black text-purple-400">₹{totalValuation.toLocaleString()}</div>
+            <div className="text-[11px] text-slate-400 mt-1">Based on purchase cost rate</div>
+          </div>
+
+          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
+            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider block mb-1">Low Stock Warnings</span>
+            <div className="text-2xl font-black text-amber-400">{lowStockCount} Items</div>
+            <div className="text-[11px] text-slate-400 mt-1">Items at or below reorder threshold</div>
+          </div>
+        </div>
+
+        {/* Filter Toolbar */}
+        <div className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search material SKU, name..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c === 'all' ? 'All Categories' : c}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setFilterLowStockOnly(!filterLowStockOnly)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
+                filterLowStockOnly
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+              }`}
+            >
+              Low Stock Only
+            </button>
+          </div>
+
+          <span className="text-xs text-slate-400 font-semibold">
+            Showing {filtered.length} Materials
+          </span>
+        </div>
+
+        {/* Materials Table */}
+        <div className="bg-slate-800/90 rounded-2xl border border-slate-700/80 shadow-lg overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-900/80 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-700">
+                <tr>
+                  <th className="py-3 px-3">Item Code / SKU</th>
+                  <th className="py-3 px-3">Material Name</th>
+                  <th className="py-3 px-3">Category</th>
+                  <th className="py-3 px-3 text-right">Cost Rate (₹)</th>
+                  <th className="py-3 px-3 text-right">Selling Rate (₹)</th>
+                  <th className="py-3 px-3 text-right">Current Stock</th>
+                  <th className="py-3 px-3 text-right">Stock Valuation (₹)</th>
+                  <th className="py-3 px-3 text-center">Status</th>
+                  <th className="py-3 px-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700/60 font-medium">
+                {filtered.length > 0 ? (
+                  filtered.map((mat) => {
+                    const isLow = Number(mat.current_qty) <= Number(mat.reorder_threshold)
+                    const valuation = Number(mat.current_qty || 0) * Number(mat.purchase_rate || 0)
+                    return (
+                      <tr key={mat.id} className="hover:bg-slate-700/40 transition-colors">
+                        <td className="py-3 px-3 font-mono font-bold text-white whitespace-nowrap">{mat.sku}</td>
+                        <td className="py-3 px-3 font-bold text-white">
+                          <div>{mat.name}</div>
+                        </td>
+                        <td className="py-3 px-3 text-slate-400">{mat.category || 'General'}</td>
+                        <td className="py-3 px-3 text-right text-slate-300 font-mono">₹{Number(mat.purchase_rate || 0).toLocaleString()}</td>
+                        <td className="py-3 px-3 text-right text-emerald-400 font-mono font-bold">₹{Number(mat.sales_rate || 0).toLocaleString()}</td>
+                        <td className="py-3 px-3 text-right font-black text-white whitespace-nowrap">
+                          {mat.current_qty} <span className="text-[10px] text-slate-400 font-normal">{mat.unit || 'pcs'}</span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-black text-purple-300 whitespace-nowrap">
+                          ₹{valuation.toLocaleString()}
+                        </td>
+                        <td className="py-3 px-3 text-center whitespace-nowrap">
+                          {isLow ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30">
+                              <AlertTriangle className="w-3 h-3 text-amber-400" />
+                              <span>Reorder</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                              <span>Optimal</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => { setMovementMaterial(mat); setIsMovementModalOpen(true) }}
+                              className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                              title="Stock Inward/Outward Movements"
+                            >
+                              <History className="w-3.5 h-3.5 text-blue-400" />
+                            </button>
+                            {isAdmin && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => startEdit(mat)}
+                                  className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                                  title="Edit Material"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(mat.id)}
+                                  className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white transition-colors"
+                                  title="Delete Material"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={9} className="py-8 text-center text-slate-500">
+                      No materials found matching filter.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </main>
 
-      {/* Marketing Product Report Modal */}
-      <ProductReportModal
-        isOpen={isReportOpen}
-        onClose={() => setIsReportOpen(false)}
-        materials={materials}
-      />
+      {/* Add / Edit Material Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-lg bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-2xl text-white font-sans"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h2 className="text-base font-bold text-white">
+                {editingId ? 'Modify Material' : 'Add New Material Stock Item'}
+              </h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-      {/* Smart Batch Model Add Modal */}
-      <BatchModelAddModal
-        isOpen={isBatchModalOpen}
-        onClose={() => setIsBatchModalOpen(false)}
-        materials={materials}
-        onSuccess={load}
-      />
+            {error && (
+              <div className="mt-3 p-3 bg-rose-500/20 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-semibold">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSave} className="space-y-3.5 pt-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">SKU / Item Code *</label>
+                  <input
+                    type="text"
+                    required
+                    value={form.sku}
+                    onChange={(e) => setForm({ ...form, sku: e.target.value })}
+                    placeholder="e.g. MAT-CANVAS-01"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Category / Group</label>
+                  <input
+                    type="text"
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    placeholder="e.g. Textiles"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Material Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="e.g. Industrial Cotton Canvas 350 GSM"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Unit of Measure</label>
+                  <input
+                    type="text"
+                    value={form.unit}
+                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                    placeholder="meter, kg, pcs, box"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Cost Rate (₹)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={form.purchase_rate}
+                    onChange={(e) => setForm({ ...form, purchase_rate: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Sales Rate (₹)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={form.sales_rate}
+                    onChange={(e) => setForm({ ...form, sales_rate: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Current Stock Quantity</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={form.current_qty}
+                    onChange={(e) => setForm({ ...form, current_qty: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Reorder Threshold</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={form.reorder_threshold}
+                    onChange={(e) => setForm({ ...form, reorder_threshold: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-600/30"
+                >
+                  {saving ? 'Saving...' : 'Save Material'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Material Inward/Outward Movements Modal */}
+      {isMovementModalOpen && movementMaterial && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-2xl bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-2xl text-white font-sans max-h-[85vh] flex flex-col"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+              <div>
+                <span className="text-[10px] font-mono text-purple-400 font-bold uppercase">Stock Register</span>
+                <h2 className="text-base font-bold text-white mt-0.5">
+                  {movementMaterial.name} ({movementMaterial.sku})
+                </h2>
+              </div>
+              <button onClick={() => setIsMovementModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 overflow-y-auto flex-1">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-800 text-slate-400 uppercase text-[10px] font-bold">
+                  <tr>
+                    <th className="py-2.5 px-3">Date</th>
+                    <th className="py-2.5 px-3">Vch No.</th>
+                    <th className="py-2.5 px-3">Type</th>
+                    <th className="py-2.5 px-3">Party</th>
+                    <th className="py-2.5 px-3 text-right">Inward / Outward Qty</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 font-medium">
+                  {materialMovements.length > 0 ? (
+                    materialMovements.map((m, i) => (
+                      <tr key={i} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-3 text-slate-300 font-mono">{m.date}</td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-white">{m.voucher_no}</td>
+                        <td className="py-2.5 px-3 uppercase text-[10px] font-bold">
+                          <span className={m.voucher_type === 'purchase' ? 'text-teal-400' : 'text-emerald-400'}>
+                            {m.voucher_type === 'purchase' ? 'IN (Purchase)' : 'OUT (Sales)'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300">{m.party_name}</td>
+                        <td className={`py-2.5 px-3 text-right font-bold ${
+                          m.voucher_type === 'purchase' ? 'text-teal-400' : 'text-rose-400'
+                        }`}>
+                          {m.voucher_type === 'purchase' ? `+${m.qty}` : `-${m.qty}`} {movementMaterial.unit || 'pcs'}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-center text-slate-500">
+                        No inward/outward voucher movements logged yet for this material.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs shrink-0">
+              <span className="text-slate-400">Current Stock in Hand:</span>
+              <span className="text-base font-black text-white">
+                {movementMaterial.current_qty} {movementMaterial.unit || 'pcs'}
+              </span>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   )
 }
