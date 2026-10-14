@@ -59,8 +59,9 @@ The **Demo Admin** and **Demo Owner** buttons are only shown in development buil
 1. Create a Supabase project and configure `.env` using the example above.
 2. Run `supabase/schema.sql` in the SQL Editor.
 3. Run `supabase/migrations/20261014_company_isolation.sql` in the SQL Editor **after** the schema. This adds companies, memberships, tenant-scoped uniqueness, and company-membership RLS. Legacy cloud rows are deliberately left unassigned and inaccessible until you explicitly map them to a company.
+4. Run `supabase/migrations/20261014_owner_readonly_permissions.sql` after the company-isolation migration. This makes company creators Owners (read-only) instead of Admins and demotes existing company creators from Admin to Owner. Explicitly assigned non-creator Admin memberships remain Admin.
 4. Enable Supabase Auth sign-in and create your user.
-5. Sign in to the app and create the company from the company setup screen. The setup RPC creates the initial administrator membership; do not manually grant roles in the old `profiles` table for company access.
+5. Sign in to the app and create the company from the company setup screen. The creator becomes an Owner with read-only access. An existing Admin must be assigned through a trusted provisioning workflow; the in-app invitation/admin-management screen is not implemented yet. Do not manually grant roles in the old `profiles` table for company access.
 
 ### Existing Supabase projects
 
@@ -70,7 +71,7 @@ Back up the project before running migrations. The migration preserves legacy ac
 
 - Most page reads and accounting calculations currently use the browser-local Dexie database.
 - Voucher cloud upserts/deletes are best-effort and do not yet provide a durable retry queue or reliable visible sync status.
-- Supabase write policies now require an `admin` profile, but the current schema does not have a company/tenant ownership model. Authenticated users can still read all rows under the current read policies.
+- Company-scoped RLS allows all company members to read records and restricts cloud writes to explicitly assigned Admin memberships. Owner read-only checks in the UI are a convenience layer; Supabase RLS remains the server-side enforcement.
 - The local Dexie database name is shared by accounts in one browser profile. Do not treat this as secure account separation.
 - Stock movements allow negative balances so that voucher reversals remain arithmetically reversible; negative-stock prevention is still a required accounting-policy feature.
 - The old Inventory Scan/QR PWA configuration was removed because the current implementation is an accounting workspace and the plugin was not a declared dependency.
