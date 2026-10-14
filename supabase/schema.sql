@@ -12,10 +12,13 @@
 -- 1. User Profiles & Roles
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
-  role text not null default 'admin' check (role in ('admin', 'owner', 'employee')),
+  role text not null default 'owner' check (role in ('admin', 'owner', 'employee')),
   full_name text,
   created_at timestamptz default now()
 );
+
+-- Existing installations must also use the least-privilege default for new profiles.
+alter table public.profiles alter column role set default 'owner';
 
 -- 2. Pure Material-Wise Inventory Table (Stock Items)
 create table if not exists public.materials (
