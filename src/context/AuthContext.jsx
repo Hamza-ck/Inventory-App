@@ -20,14 +20,11 @@ export function AuthProvider({ children }) {
   const [role, setRoleState] = useState('owner')
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
+    supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       if (data.session) {
         fetchProfileRole(data.session.user.id)
       } else {
-        if (import.meta.env.DEV && demoRole) {
-          await initDefaultAccountingData().catch((err) => console.warn('Demo data initialization failed:', err))
-        }
         setRoleState(demoRole || 'owner')
         setLoading(false)
       }
@@ -36,12 +33,14 @@ export function AuthProvider({ children }) {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
       if (newSession) {
-        // Clear demo identity as soon as a real account is present.
+        // Drop demo privileges while a real account's role is being verified.
         setDemoRoleState(null)
         localStorage.removeItem('tally_saas_demo_role')
+        setRoleState('owner')
+        setLoading(true)
         fetchProfileRole(newSession.user.id)
       } else {
-        setRoleState(demoRole || 'owner')
+        setRoleState('owner')
         setLoading(false)
       }
     })
@@ -69,8 +68,10 @@ export function AuthProvider({ children }) {
 
   // Used only by the explicit local-demo buttons on the login screen.
   async function setRole(newRole) {
-    // Demo access is only available in local development builds.
-    if (!import.meta.env.DEV) return
+    // Demo access is only available in local development and never alongside a real session.
+    if (!import.meta.env.DEV || session) {
+      throw new Error('Local demo mode is unavailable while signed in.')
+    }
     const demoRoleValue = newRole === 'admin' ? 'admin' : 'owner'
     await initDefaultAccountingData()
     setDemoRoleState(demoRoleValue)
