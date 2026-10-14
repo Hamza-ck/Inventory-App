@@ -190,7 +190,7 @@ export function AuthProvider({ children }) {
     role,
     setRole,
     isAdmin: role === 'admin',
-    isOwner: role === 'owner',
+    isOwner: role !== 'admin',
     isDemoMode: !session && Boolean(demoRole),
     companyId,
     companyName,
