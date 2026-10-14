@@ -31,15 +31,15 @@ alter table public.parties drop constraint if exists parties_uid_key;
 alter table public.vouchers drop constraint if exists vouchers_voucher_no_key;
 
 create unique index if not exists materials_company_sku_key
-  on public.materials(company_id, sku) where company_id is not null;
+  on public.materials(company_id, sku);
 create unique index if not exists ledgers_company_name_key
-  on public.ledgers(company_id, name) where company_id is not null;
+  on public.ledgers(company_id, name);
 create unique index if not exists parties_company_name_type_key
-  on public.parties(company_id, name, type) where company_id is not null;
+  on public.parties(company_id, name, type);
 create unique index if not exists parties_company_uid_key
-  on public.parties(company_id, uid) where company_id is not null and uid is not null;
+  on public.parties(company_id, uid);
 create unique index if not exists vouchers_company_number_key
-  on public.vouchers(company_id, voucher_no) where company_id is not null;
+  on public.vouchers(company_id, voucher_no);
 
 create index if not exists idx_company_memberships_user on public.company_memberships(user_id);
 create index if not exists idx_materials_company on public.materials(company_id);
