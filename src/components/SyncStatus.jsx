@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, CheckCircle2, Cloud, CloudOff, LoaderCircle, RefreshCw } from 'lucide-react'
-import { getSyncQueueSummary, syncOutbox } from '../lib/accountingDb'
+import { getSyncQueueSummary, hydrateCompanyFromSupabase, syncOutbox } from '../lib/accountingDb'
 import { useAuth } from '../context/AuthContext'
 
 export default function SyncStatus() {
@@ -21,7 +21,7 @@ export default function SyncStatus() {
     if (!session || !companyId || isDemoMode || !online) return
     setSyncing(true)
     try {
-      await syncOutbox()
+      await hydrateCompanyFromSupabase()
     } finally {
       await refresh()
       setSyncing(false)
@@ -34,7 +34,7 @@ export default function SyncStatus() {
     const handleQueueChange = () => refresh()
     const handleOnline = () => {
       setOnline(true)
-      setTimeout(() => syncOutbox().catch(() => {}), 0)
+      setTimeout(() => hydrateCompanyFromSupabase().catch((err) => console.error('Company refresh failed:', err)), 0)
     }
     const handleOffline = () => setOnline(false)
     window.addEventListener('accounting-sync-updated', handleQueueChange)
