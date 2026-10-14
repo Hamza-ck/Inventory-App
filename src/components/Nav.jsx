@@ -14,16 +14,13 @@ import {
   ShieldCheck, 
   Menu, 
   X,
-  CreditCard,
-  Building2,
-  TrendingUp,
-  Sparkles
+  Building2
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import VoucherModal from './VoucherModal'
 
 export default function Nav() {
-  const { role, setRole, isAdmin, isOwner, signOut, user } = useAuth()
+  const { isAdmin, signOut, isDemoMode } = useAuth()
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
@@ -37,11 +34,6 @@ export default function Nav() {
     { to: '/tally', label: 'Tally Import/Export', icon: FileSpreadsheet },
   ]
 
-  function toggleRole() {
-    const nextRole = role === 'admin' ? 'owner' : 'admin'
-    setRole(nextRole)
-  }
-
   return (
     <>
       <header className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-md no-print">
@@ -52,6 +44,8 @@ export default function Nav() {
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="lg:hidden p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
               aria-label="Toggle menu"
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="mobile-primary-navigation"
             >
               {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -101,7 +95,7 @@ export default function Nav() {
               <button
                 type="button"
                 onClick={() => setIsVoucherModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-xl shadow-xs shadow-emerald-500/20 active:scale-95 transition-all"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-xl shadow-xs shadow-emerald-500/20 active:scale-95 transition-all"
                 title="Create Tally Voucher (F8 Sales, F9 Purchase, F6 Receipt, F5 Payment, F4 Contra)"
               >
                 <PlusCircle className="w-3.5 h-3.5" />
@@ -115,35 +109,39 @@ export default function Nav() {
               </span>
             )}
 
-            {/* Role Switcher Pill */}
-            <button
-              type="button"
-              onClick={toggleRole}
-              title={`Click to switch role (Current: ${role.toUpperCase()})`}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+            {/* Access level is informational; role changes must come from account permissions. */}
+            <div
+              title={isAdmin ? 'Administrator access' : 'Read-only access'}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
                 isAdmin
-                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40 hover:bg-blue-500/30'
-                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
               }`}
             >
               {isAdmin ? (
                 <>
                   <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Admin (Data Entry)</span>
+                  <span>Admin</span>
                 </>
               ) : (
                 <>
                   <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Owner (Track Only)</span>
+                  <span>Read-only</span>
                 </>
               )}
-            </button>
+            </div>
+            {isDemoMode && (
+              <span className="hidden md:inline-flex px-2 py-1 rounded-lg bg-slate-800 text-slate-300 text-[10px] font-bold uppercase tracking-wide">
+                Demo
+              </span>
+            )}
 
             {/* Sign Out */}
             <button
               type="button"
               onClick={signOut}
               title="Sign out"
+          aria-label="Sign out"
               className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
             >
               <LogOut className="w-4 h-4" />
@@ -153,7 +151,7 @@ export default function Nav() {
 
         {/* Mobile Dropdown Menu */}
         {isMobileMenuOpen && (
-          <div className="lg:hidden border-t border-slate-800 bg-slate-900 px-4 py-3 space-y-1">
+          <div id="mobile-primary-navigation" className="lg:hidden border-t border-slate-800 bg-slate-900 px-4 py-3 space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon
               return (
