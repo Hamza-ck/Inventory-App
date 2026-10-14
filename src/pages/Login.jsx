@@ -12,7 +12,7 @@ export default function Login() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-  const { setRole } = useAuth()
+  const { setRole, session } = useAuth()
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -67,7 +67,7 @@ export default function Login() {
         </div>
 
         {/* Demo Fast Access Buttons are intentionally development-only. */}
-        {import.meta.env.DEV && (
+        {import.meta.env.DEV && !session && (
         <div className="mb-6 p-3.5 bg-slate-800/80 rounded-2xl border border-slate-700 space-y-2">
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-300">
             <Sparkles className="w-3.5 h-3.5 text-blue-400" />
