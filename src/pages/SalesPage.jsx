@@ -17,7 +17,7 @@ import {
   FileText 
 } from 'lucide-react'
 import { accDb } from '../lib/accountingDb'
-import { jsQuery } from '../lib/jsQuery'
+import { getLocalDateString, jsQuery } from '../lib/jsQuery'
 import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
 import VoucherModal from '../components/VoucherModal'
@@ -64,7 +64,7 @@ export default function SalesPage() {
       q = q.where((v) => Number(v.due_amount || 0) > 0)
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10)
+    const todayStr = getLocalDateString()
     if (dateFilter === 'today') {
       q = q.where((v) => (v.date || '').slice(0, 10) === todayStr)
     } else if (dateFilter === 'month') {
