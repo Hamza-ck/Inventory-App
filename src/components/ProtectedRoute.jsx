@@ -2,7 +2,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function ProtectedRoute({ children, requireRole }) {
-  const { session, role, loading, user } = useAuth()
+  const { session, role, loading, user, companyId, isDemoMode } = useAuth()
 
   if (loading) {
     return (
@@ -20,9 +20,13 @@ export default function ProtectedRoute({ children, requireRole }) {
     return <Navigate to="/login" replace />
   }
 
-  if (requireRole && role !== requireRole && requireRole === 'admin' && role === 'owner') {
-    // Owner is restricted from admin-only write pages if any, but our design makes pages accessible in read-only mode
-    return children
+  // Authenticated users must select or create a company before opening accounting pages.
+  if (session && !companyId && !isDemoMode) {
+    return <Navigate to="/setup-company" replace />
+  }
+
+  if (requireRole && role !== requireRole && requireRole === 'admin' && role !== 'admin') {
+    return <Navigate to="/" replace />
   }
 
   return children
