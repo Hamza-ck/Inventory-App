@@ -18,7 +18,6 @@ import {
   Clock, 
   CheckCircle2,
   Calendar,
-  Layers
 } from 'lucide-react'
 import { 
   ResponsiveContainer, 
