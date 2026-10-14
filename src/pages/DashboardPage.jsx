@@ -34,7 +34,7 @@ import {
   Bar 
 } from 'recharts'
 import { accDb } from '../lib/accountingDb'
-import { calculateFinancialMetrics } from '../lib/jsQuery'
+import { calculateFinancialMetrics, calculateVoucherGrossProfit, getLocalDateString } from '../lib/jsQuery'
 import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
 import VoucherModal from '../components/VoucherModal'
@@ -83,37 +83,28 @@ export default function DashboardPage() {
     })
     setRecentVouchers(sortedVouchers.slice(0, 8))
 
-    // Build 7-day Sales & Profit Trend for chart
-    const days = []
+    // Prepare seven local-business-date buckets, then aggregate vouchers in one pass.
+    const chartDaysByDate = new Map()
     for (let i = 6; i >= 0; i--) {
       const d = new Date()
+      d.setHours(0, 0, 0, 0)
       d.setDate(d.getDate() - i)
-      const dateStr = d.toISOString().slice(0, 10)
-      const daySales = vouchers
-        .filter((v) => v.voucher_type === 'sales' && (v.date || '').slice(0, 10) === dateStr)
-        .reduce((sum, v) => sum + (Number(v.amount) || 0), 0)
-
-      const dayProfit = vouchers
-        .filter((v) => v.voucher_type === 'sales' && (v.date || '').slice(0, 10) === dateStr)
-        .reduce((sum, v) => {
-          let g = 0
-          if (Array.isArray(v.items) && v.items.length > 0) {
-            v.items.forEach((it) => {
-              g += ((Number(it.rate) || 0) - (Number(it.cost_rate) || 0)) * (Number(it.qty) || 0)
-            })
-          } else {
-            g = (Number(v.amount) || 0) * 0.25
-          }
-          return sum + g
-        }, 0)
-
-      days.push({
-        date: d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' }),
-        Sales: daySales,
-        Profit: dayProfit,
+      chartDaysByDate.set(getLocalDateString(d), {
+        date: d.toLocaleDateString('en-IN', { weekday: 'short', month: 'numeric', day: 'numeric' }),
+        Sales: 0,
+        Profit: 0,
       })
     }
-    setChartData(days)
+
+    for (const voucher of vouchers) {
+      if (voucher.voucher_type !== 'sales') continue
+      const day = chartDaysByDate.get((voucher.date || '').slice(0, 10))
+      if (!day) continue
+      day.Sales += Number(voucher.amount) || 0
+      day.Profit += calculateVoucherGrossProfit(voucher)
+    }
+
+    setChartData([...chartDaysByDate.values()])
     setLoading(false)
   }
 
@@ -388,8 +379,8 @@ export default function DashboardPage() {
         <div className="bg-slate-800/90 rounded-2xl p-5 border border-slate-700/80 shadow-lg">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-base font-bold text-white">7-Day Sales & Profit Margin Curve</h2>
-              <p className="text-xs text-slate-400">Daily sales revenue vs gross profit generated</p>
+              <h2 className="text-base font-bold text-white">7-Day Sales & Gross Profit</h2>
+              <p className="text-xs text-slate-400">Profit is estimated at 20% when item cost rates are missing.</p>
             </div>
             <div className="flex items-center gap-3 text-xs font-semibold">
               <span className="flex items-center gap-1.5 text-blue-400">
