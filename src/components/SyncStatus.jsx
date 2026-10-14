@@ -21,6 +21,7 @@ export default function SyncStatus() {
     if (!session || !companyId || isDemoMode || !online) return
     setSyncing(true)
     try {
+      await syncOutbox({ force: true })
       await hydrateCompanyFromSupabase()
     } finally {
       await refresh()
