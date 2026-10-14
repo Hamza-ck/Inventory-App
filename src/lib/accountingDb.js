@@ -286,6 +286,9 @@ export async function createVoucher(voucherData) {
   // Apply financial & inventory effects
   await applyVoucherEffects(data, false)
 
+  // Asynchronously sync to Supabase cloud if connected
+  syncVoucherToSupabase(data).catch(() => {})
+
   return data
 }
 
@@ -325,6 +328,9 @@ export async function updateVoucher(id, updatedData) {
   // 4. Apply new effects
   await applyVoucherEffects(newVoucher, false)
 
+  // Asynchronously sync to Supabase
+  syncVoucherToSupabase(newVoucher).catch(() => {})
+
   return newVoucher
 }
 
@@ -340,6 +346,12 @@ export async function deleteVoucher(id) {
 
   // Remove from database
   await accDb.vouchers.delete(Number(id))
+
+  // Asynchronously delete from Supabase
+  if (existingVoucher.voucher_no) {
+    syncDeleteVoucherFromSupabase(existingVoucher.voucher_no).catch(() => {})
+  }
+
   return true
 }
 
@@ -568,3 +580,40 @@ export async function initDefaultAccountingData() {
     await accDb.vouchers.add(v)
   }
 }
+
+/**
+ * Cloud Synchronization Helpers with Supabase (Offline-first resilient)
+ */
+export async function syncVoucherToSupabase(voucher) {
+  try {
+    const payload = {
+      voucher_no: voucher.voucher_no,
+      voucher_type: voucher.voucher_type,
+      date: voucher.date,
+      party_name: voucher.party_name,
+      party_uid: voucher.party_uid || null,
+      amount: Number(voucher.amount) || 0,
+      paid_amount: Number(voucher.paid_amount) || 0,
+      due_amount: Number(voucher.due_amount) || 0,
+      payment_mode: voucher.payment_mode || 'Cash',
+      narration: voucher.narration || '',
+      reference_no: voucher.reference_no || '',
+      items: voucher.items || [],
+      updated_at: new Date().toISOString(),
+    }
+
+    await supabase.from('vouchers').upsert(payload, { onConflict: 'voucher_no' })
+  } catch (err) {
+    // Graceful offline fallback
+    console.debug('Cloud sync deferred (offline):', err.message)
+  }
+}
+
+export async function syncDeleteVoucherFromSupabase(voucherNo) {
+  try {
+    await supabase.from('vouchers').delete().eq('voucher_no', voucherNo)
+  } catch (err) {
+    console.debug('Cloud sync deferred (offline):', err.message)
+  }
+}
+
