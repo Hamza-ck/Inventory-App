@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { initDefaultAccountingData, setAccountingScope, syncOutbox } from '../lib/accountingDb'
+import { hydrateCompanyFromSupabase, initDefaultAccountingData, setAccountingScope, syncOutbox } from '../lib/accountingDb'
 
 const AuthContext = createContext(null)
 
@@ -58,7 +58,7 @@ export function AuthProvider({ children }) {
 
       if (selected?.companyId) {
         localStorage.setItem(companyStorageKey(userId), selected.companyId)
-        syncOutbox().catch((err) => console.warn('Initial sync check failed:', err))
+        hydrateCompanyFromSupabase().catch((err) => console.error('Initial company data sync failed:', err))
       } else {
         localStorage.removeItem(companyStorageKey(userId))
       }
@@ -161,7 +161,7 @@ export function AuthProvider({ children }) {
     setAccountingScope(selected.companyId)
     localStorage.setItem(companyStorageKey(session.user.id), selected.companyId)
     window.dispatchEvent(new Event('accounting-data-updated'))
-    syncOutbox().catch((err) => console.warn('Company sync check failed:', err))
+    hydrateCompanyFromSupabase().catch((err) => console.error('Company data refresh failed:', err))
   }
 
   async function signOut() {
