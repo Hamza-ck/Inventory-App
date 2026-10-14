@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import VoucherModal from './VoucherModal'
+import SyncStatus from './SyncStatus'
 
 export default function Nav() {
   const { isAdmin, signOut, isDemoMode, session, companyId, companyName, companyMemberships, setActiveCompany } = useAuth()
@@ -108,6 +109,7 @@ export default function Nav() {
 
           {/* Right Action Tools */}
           <div className="flex items-center gap-2.5">
+            <SyncStatus />
             {/* Quick Voucher Button (Admin only) */}
             {isAdmin ? (
               <button
