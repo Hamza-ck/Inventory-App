@@ -868,7 +868,7 @@ async function pushOutboxJob(db, job, sessionUserId) {
   if (error) throw error
 }
 
-export async function syncOutbox() {
+export async function syncOutbox({ force = false } = {}) {
   if (syncInFlight) return syncInFlight
   const companyId = getActiveCompanyId()
   if (!companyId || (typeof navigator !== 'undefined' && !navigator.onLine)) return getSyncQueueSummary()
@@ -879,7 +879,7 @@ export async function syncOutbox() {
     if (sessionError || !sessionData?.session?.user) return getSyncQueueSummary()
 
     const jobs = (await db.syncQueue.where('company_id').equals(companyId).toArray())
-      .filter((job) => job.status === 'pending' && new Date(job.next_attempt_at || 0).getTime() <= Date.now())
+      .filter((job) => job.status === 'pending' && (force || new Date(job.next_attempt_at || 0).getTime() <= Date.now()))
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       .slice(0, 25)
 
