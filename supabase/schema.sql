@@ -111,6 +111,24 @@ alter table public.ledgers enable row level security;
 alter table public.parties enable row level security;
 alter table public.vouchers enable row level security;
 
+-- Helper functions to check roles.
+-- SECURITY DEFINER avoids recursive RLS evaluation when the function reads profiles.
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'admin'
+  );
+$;
+
+revoke all on function public.is_admin() from public;
+grant execute on function public.is_admin() to authenticated;
+
 -- Profiles Policies
 drop policy if exists "Profiles are readable by authenticated users" on public.profiles;
 create policy "Profiles are readable by authenticated users" on public.profiles
@@ -118,14 +136,8 @@ create policy "Profiles are readable by authenticated users" on public.profiles
 
 drop policy if exists "Admin manages all profiles" on public.profiles;
 create policy "Admin manages all profiles" on public.profiles
-  for all using (
-    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
-  );
-
--- Helper functions to check roles
-create or replace function public.is_admin() returns boolean as $$
-  select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin');
-$$ language sql security definer;
+  for all using (public.is_admin())
+  with check (public.is_admin());
 
 -- Read policies: Both Owner and Admin can read and track
 create policy "Authenticated users can read materials" on public.materials
@@ -140,39 +152,52 @@ create policy "Authenticated users can read parties" on public.parties
 create policy "Authenticated users can read vouchers" on public.vouchers
   for select using (auth.role() = 'authenticated');
 
--- Write policies: Only Admin can insert, update, or delete
+-- Write policies: only an administrator profile may mutate accounting records.
+-- Do not add auth.role() = 'authenticated' here; that would allow every signed-in
+-- user to write regardless of their application role.
+drop policy if exists "Admin can insert materials" on public.materials;
 create policy "Admin can insert materials" on public.materials
-  for insert with check (public.is_admin() or auth.role() = 'authenticated');
+  for insert with check (public.is_admin());
 
+drop policy if exists "Admin can update materials" on public.materials;
 create policy "Admin can update materials" on public.materials
-  for update using (public.is_admin() or auth.role() = 'authenticated');
+  for update using (public.is_admin()) with check (public.is_admin());
 
+drop policy if exists "Admin can delete materials" on public.materials;
 create policy "Admin can delete materials" on public.materials
-  for delete using (public.is_admin() or auth.role() = 'authenticated');
+  for delete using (public.is_admin());
 
+drop policy if exists "Admin can insert ledgers" on public.ledgers;
 create policy "Admin can insert ledgers" on public.ledgers
-  for insert with check (public.is_admin() or auth.role() = 'authenticated');
+  for insert with check (public.is_admin());
 
+drop policy if exists "Admin can update ledgers" on public.ledgers;
 create policy "Admin can update ledgers" on public.ledgers
-  for update using (public.is_admin() or auth.role() = 'authenticated');
+  for update using (public.is_admin()) with check (public.is_admin());
 
+drop policy if exists "Admin can insert parties" on public.parties;
 create policy "Admin can insert parties" on public.parties
-  for insert with check (public.is_admin() or auth.role() = 'authenticated');
+  for insert with check (public.is_admin());
 
+drop policy if exists "Admin can update parties" on public.parties;
 create policy "Admin can update parties" on public.parties
-  for update using (public.is_admin() or auth.role() = 'authenticated');
+  for update using (public.is_admin()) with check (public.is_admin());
 
+drop policy if exists "Admin can delete parties" on public.parties;
 create policy "Admin can delete parties" on public.parties
-  for delete using (public.is_admin() or auth.role() = 'authenticated');
+  for delete using (public.is_admin());
 
+drop policy if exists "Admin can insert vouchers" on public.vouchers;
 create policy "Admin can insert vouchers" on public.vouchers
-  for insert with check (public.is_admin() or auth.role() = 'authenticated');
+  for insert with check (public.is_admin());
 
+drop policy if exists "Admin can update vouchers" on public.vouchers;
 create policy "Admin can update vouchers" on public.vouchers
-  for update using (public.is_admin() or auth.role() = 'authenticated');
+  for update using (public.is_admin()) with check (public.is_admin());
 
+drop policy if exists "Admin can delete vouchers" on public.vouchers;
 create policy "Admin can delete vouchers" on public.vouchers
-  for delete using (public.is_admin() or auth.role() = 'authenticated');
+  for delete using (public.is_admin());
 
 -- ==============================================================================
 -- Initial Seed Data (Standard Chart of Accounts & Material Stock)
