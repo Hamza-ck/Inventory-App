@@ -94,13 +94,42 @@ export function jsQuery(data) {
   return new JSQueryChain(data)
 }
 
+// Calendar date in the browser's local timezone (the business date), not UTC.
+export function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+// Use a single profit rule for dashboard and financial summaries.
+// When cost rates are unavailable, return a marked estimate rather than an
+// accidental 100% margin caused by treating missing cost as zero.
+export function calculateVoucherGrossProfit(voucher, estimatedMargin = 0.2) {
+  const items = Array.isArray(voucher?.items) ? voucher.items : []
+  const hasCompleteCosts = items.length > 0 && items.every(
+    (item) => item.cost_rate !== undefined && item.cost_rate !== null && item.cost_rate !== ''
+  )
+
+  if (hasCompleteCosts) {
+    return items.reduce((sum, item) => {
+      const qty = Number(item.qty) || 0
+      const rate = Number(item.rate) || 0
+      const costRate = Number(item.cost_rate) || 0
+      return sum + (rate - costRate) * qty
+    }, 0)
+  }
+
+  return (Number(voucher?.amount) || 0) * estimatedMargin
+}
+
 /**
  * High-Level Financial Calculations (Profits, Cash & Bank, Loans, Debtors, Creditors)
  */
 
 export function calculateFinancialMetrics({ vouchers = [], ledgers = [], materials = [], parties = [] }) {
   const allVouchers = vouchers || []
-  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayStr = getLocalDateString()
 
   // 1. Daily Sales & Total Sales
   const salesVouchers = allVouchers.filter((v) => v.voucher_type === 'sales')
@@ -119,18 +148,7 @@ export function calculateFinancialMetrics({ vouchers = [], ledgers = [], materia
 
   salesVouchers.forEach((v) => {
     const isToday = (v.date || '').slice(0, 10) === todayStr
-    let voucherGross = 0
-    if (Array.isArray(v.items) && v.items.length > 0) {
-      v.items.forEach((item) => {
-        const qty = Number(item.qty) || 0
-        const rate = Number(item.rate) || 0
-        const costRate = Number(item.cost_rate) || 0
-        voucherGross += (rate - costRate) * qty
-      })
-    } else {
-      // Estimated 20% margin if item cost rate is not specified
-      voucherGross = (Number(v.amount) || 0) * 0.2
-    }
+    const voucherGross = calculateVoucherGrossProfit(v)
     totalGrossProfit += voucherGross
     if (isToday) todayGrossProfit += voucherGross
   })
