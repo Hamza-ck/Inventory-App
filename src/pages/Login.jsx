@@ -18,12 +18,20 @@ export default function Login() {
     e.preventDefault()
     setError(null)
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
-    if (error) {
-      setError(error.message)
-    } else {
-      navigate('/')
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+      if (error) {
+        setError(error.message)
+      } else {
+        navigate('/')
+      }
+    } catch {
+      setError('Unable to sign in right now. Check your connection and try again.')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -59,6 +67,9 @@ export default function Login() {
             <Sparkles className="w-3.5 h-3.5 text-blue-400" />
             <span>Instant Demo Access (No password needed)</span>
           </div>
+          <p className="text-[11px] leading-relaxed text-amber-200/90">
+            Demo mode uses this browser’s local records and is not isolated from a real account. Do not enter real business or customer data in demo mode.
+          </p>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
