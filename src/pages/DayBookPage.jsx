@@ -12,8 +12,6 @@ import {
   Eye, 
   Download, 
   ShieldCheck, 
-  Layers,
-  ArrowRightLeft,
   X
 } from 'lucide-react'
 import { accDb, deleteVoucher } from '../lib/accountingDb'
