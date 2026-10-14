@@ -414,6 +414,30 @@ async function applyVoucherEffects(voucher, isReversal = false) {
   }
 }
 
+function validateVoucherData(voucher) {
+  const amountFields = ['amount', 'paid_amount', 'due_amount']
+  for (const field of amountFields) {
+    if (voucher[field] === undefined || voucher[field] === null || voucher[field] === '') continue
+    const value = Number(voucher[field])
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`${field.replaceAll('_', ' ')} must be a valid non-negative amount.`)
+    }
+  }
+
+  if (Array.isArray(voucher.items)) {
+    for (const [index, item] of voucher.items.entries()) {
+      const qty = Number(item.qty)
+      const rate = Number(item.rate)
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw new Error(`Item ${index + 1}: quantity must be greater than zero.`)
+      }
+      if (!Number.isFinite(rate) || rate < 0) {
+        throw new Error(`Item ${index + 1}: rate must be a valid non-negative amount.`)
+      }
+    }
+  }
+}
+
 /**
  * Save New Voucher (Sales, Purchase, Payment, Receipt, Contra, Journal)
  */
@@ -429,7 +453,12 @@ export async function createVoucher(voucherData) {
     data.voucher_no = `${prefix}-${Date.now().toString().slice(-6)}`
   }
 
+  validateVoucherData(data)
+
   const created = await db.transaction('rw', ...db.tables, async () => {
+    const duplicate = await db.vouchers.where('voucher_no').equals(data.voucher_no).first()
+    if (duplicate) throw new Error(`Voucher number "${data.voucher_no}" already exists.`)
+
     if (data.voucher_type === 'sales') {
       const { party, uid } = await resolvePartyUidOnSale(data.party_name, data.due_amount, data.party_phone)
       if (party) data.party_id = party.id
@@ -455,13 +484,21 @@ export async function updateVoucher(id, updatedData) {
     const existingVoucher = await db.vouchers.get(Number(id))
     if (!existingVoucher) throw new Error('Voucher not found for modification')
 
-    // Reverse, replace, and reapply within one IndexedDB transaction.
-    await applyVoucherEffects(existingVoucher, true)
     const newVoucher = {
       ...existingVoucher,
       ...updatedData,
       updatedAt: new Date().toISOString(),
     }
+    validateVoucherData(newVoucher)
+
+    const duplicate = await db.vouchers.where('voucher_no').equals(newVoucher.voucher_no).first()
+    if (duplicate && Number(duplicate.id) !== Number(id)) {
+      throw new Error(`Voucher number "${newVoucher.voucher_no}" already exists.`)
+    }
+
+    // Validate before reversing anything; the transaction will roll back all
+    // local ledger/party/stock/outbox mutations if any later step fails.
+    await applyVoucherEffects(existingVoucher, true)
 
     if (newVoucher.voucher_type === 'sales') {
       const { party, uid } = await resolvePartyUidOnSale(
