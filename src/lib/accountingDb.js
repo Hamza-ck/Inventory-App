@@ -874,6 +874,127 @@ export async function syncOutbox() {
   return syncInFlight
 }
 
+/**
+ * Pull the authoritative company snapshot after queued local writes have synced.
+ * This is intentionally skipped whenever an outbox job remains: replacing local
+ * tables while writes are pending could discard unsynced work.
+ */
+const hydrationInFlight = new Map()
+
+export async function hydrateCompanyFromSupabase() {
+  const companyId = getActiveCompanyId()
+  if (!companyId) return { hydrated: false, reason: 'no-company' }
+  if (hydrationInFlight.has(companyId)) return hydrationInFlight.get(companyId)
+
+  const task = (async () => {
+    const summary = await syncOutbox()
+    if (summary.pending > 0) {
+      return { hydrated: false, reason: 'pending-sync', ...summary }
+    }
+    if (getActiveCompanyId() !== companyId) {
+      return { hydrated: false, reason: 'company-changed' }
+    }
+
+    const entities = ['vouchers', 'materials', 'parties', 'ledgers']
+    const remoteRows = {}
+    for (const entity of entities) {
+      const { data, error } = await supabase
+        .from(entity)
+        .select('*')
+        .eq('company_id', companyId)
+        .is('deleted_at', null)
+      if (error) throw new Error(`Could not load company ${entity}: ${error.message}`)
+      remoteRows[entity] = data || []
+    }
+
+    // Recheck after network I/O: the user may have switched companies.
+    if (getActiveCompanyId() !== companyId) {
+      return { hydrated: false, reason: 'company-changed' }
+    }
+
+    const db = getDatabaseForScope(companyId)
+    const keyOf = {
+      vouchers: (row) => String(row.voucher_no || ''),
+      materials: (row) => String(row.sku || ''),
+      parties: (row) => JSON.stringify([row.type || '', row.name || '']),
+      ledgers: (row) => String(row.name || ''),
+    }
+    const normalize = {
+      vouchers: (row) => ({
+        voucher_no: row.voucher_no,
+        voucher_type: row.voucher_type,
+        date: row.date,
+        party_name: row.party_name || 'Cash',
+        party_uid: row.party_uid || null,
+        amount: Number(row.amount) || 0,
+        paid_amount: Number(row.paid_amount) || 0,
+        due_amount: Number(row.due_amount) || 0,
+        payment_mode: row.payment_mode || 'Cash',
+        narration: row.narration || '',
+        reference_no: row.reference_no || '',
+        items: Array.isArray(row.items) ? row.items : [],
+        createdAt: row.created_at || new Date().toISOString(),
+        updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
+      }),
+      materials: (row) => ({
+        sku: row.sku,
+        name: row.name,
+        category: row.category || 'General',
+        unit: row.unit || 'pcs',
+        purchase_rate: Number(row.purchase_rate) || 0,
+        sales_rate: Number(row.sales_rate) || 0,
+        current_qty: Number(row.current_qty) || 0,
+        reorder_threshold: Number(row.reorder_threshold) || 0,
+      }),
+      parties: (row) => ({
+        name: row.name,
+        type: row.type,
+        uid: row.uid || null,
+        phone: row.phone || '',
+        email: row.email || '',
+        address: row.address || '',
+        opening_balance: Number(row.opening_balance) || 0,
+        current_balance: Number(row.current_balance) || 0,
+        created_at: row.created_at || new Date().toISOString(),
+        updated_at: row.updated_at || row.created_at || new Date().toISOString(),
+      }),
+      ledgers: (row) => ({
+        name: row.name,
+        group: row.group || 'General',
+        opening_balance: Number(row.opening_balance) || 0,
+        current_balance: Number(row.current_balance) || 0,
+        is_system: Boolean(row.is_system),
+      }),
+    }
+
+    await db.transaction('rw', ...entities.map((entity) => db.table(entity)), async () => {
+      for (const entity of entities) {
+        const table = db.table(entity)
+        const existingRows = await table.toArray()
+        const existingByKey = new Map(existingRows.map((row) => [keyOf[entity](row), row]))
+        const incoming = remoteRows[entity].map((remote) => {
+          const normalized = normalize[entity](remote)
+          const previous = existingByKey.get(keyOf[entity](normalized))
+          // Keep browser-local primary keys so current UI edit references remain valid.
+          if (previous?.id !== undefined) normalized.id = previous.id
+          if (entity === 'vouchers' && previous?.party_id !== undefined) normalized.party_id = previous.party_id
+          return normalized
+        })
+        await table.clear()
+        if (incoming.length) await table.bulkAdd(incoming)
+      }
+    })
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('accounting-data-updated'))
+    }
+    return { hydrated: true, companyId, counts: Object.fromEntries(entities.map((entity) => [entity, remoteRows[entity].length])) }
+  })().finally(() => hydrationInFlight.delete(companyId))
+
+  hydrationInFlight.set(companyId, task)
+  return task
+}
+
 // Compatibility helpers: normal voucher mutations are queued automatically by the
 // tracked-table proxy. These functions remain available to older call sites.
 export async function syncVoucherToSupabase(voucher) {
