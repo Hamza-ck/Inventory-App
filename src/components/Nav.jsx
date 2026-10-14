@@ -121,21 +121,15 @@ export default function Nav() {
               {isAdmin ? (
                 <>
                   <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Admin</span>
+                  <span>{isDemoMode ? "Demo Admin" : "Admin"}</span>
                 </>
               ) : (
                 <>
                   <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Read-only</span>
+                  <span>{isDemoMode ? "Demo read-only" : "Read-only"}</span>
                 </>
               )}
             </div>
-            {isDemoMode && (
-              <span className="hidden md:inline-flex px-2 py-1 rounded-lg bg-slate-800 text-slate-300 text-[10px] font-bold uppercase tracking-wide">
-                Demo
-              </span>
-            )}
-
             {/* Sign Out */}
             <button
               type="button"
