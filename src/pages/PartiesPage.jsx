@@ -23,6 +23,7 @@ import { accDb, createVoucher } from '../lib/accountingDb'
 import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
 import VoucherModal from '../components/VoucherModal'
+import { getLocalDateString } from '../lib/jsQuery'
 
 export default function PartiesPage() {
   const { isAdmin, isOwner } = useAuth()
@@ -164,7 +165,7 @@ export default function PartiesPage() {
       await createVoucher({
         voucher_type: vchType,
         voucher_no: `${vchType.toUpperCase().slice(0, 3)}-${Date.now().toString().slice(-5)}`,
-        date: new Date().toISOString().slice(0, 10),
+        date: getLocalDateString(),
         party_id: quickSettleParty.id,
         party_name: quickSettleParty.name,
         party_uid: quickSettleParty.uid || null,
