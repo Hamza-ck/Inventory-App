@@ -64,6 +64,7 @@ export default function ControlCenterPage() {
   const [users, setUsers] = useState([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [activity, setActivity] = useState([])
+  const [auditEvents, setAuditEvents] = useState([])
   const [imports, setImports] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
 
@@ -72,39 +73,48 @@ export default function ControlCenterPage() {
     try {
       const rows = await accDb.settings.toArray()
       const saved = Object.fromEntries(rows.map((row) => [row.key, row.value]))
-      setSettings((current) => ({ ...defaults, ...current, ...saved }))
+      let remote = {}
+      if (supabaseConfigured && user?.id && user.id !== 'local-demo') {
+        const { data, error: remoteError } = await supabase.from('app_settings').select('key,value')
+        if (!remoteError) remote = Object.fromEntries((data || []).map((row) => [row.key, row.value]))
+      }
+      setSettings((current) => ({ ...defaults, ...current, ...saved, ...remote }))
     } catch (problem) {
       setError(problem?.message || 'Could not load saved settings from this browser.')
     } finally {
       setLoadingSettings(false)
     }
-  }, [])
+  }, [user?.id])
 
   const loadUsers = useCallback(async () => {
-    if (!isAdmin || !supabaseConfigured) return
+    if (!isAdmin || !supabaseConfigured || !user?.id || user.id === 'local-demo') return
     setUsersLoading(true)
     setError('')
     const { data, error: queryError } = await supabase.from('profiles').select('id,full_name,role').order('full_name', { ascending: true })
     if (queryError) setError('Could not load profiles: ' + queryError.message)
     else setUsers(data || [])
     setUsersLoading(false)
-  }, [isAdmin])
+  }, [isAdmin, user?.id])
 
   const loadActivity = useCallback(async () => {
     setActivityLoading(true)
     try {
       const vouchers = await accDb.vouchers.toArray()
       setActivity(vouchers.sort((a, b) => new Date(b.created_at || b.createdAt || b.date || 0) - new Date(a.created_at || a.createdAt || a.date || 0)).slice(0, 20))
-      if (isAdmin && supabaseConfigured) {
-        const { data, error: queryError } = await supabase.from('import_jobs').select('id,filename,source_format,status,counts,created_at,committed_at').order('created_at', { ascending: false }).limit(10)
-        if (!queryError) setImports(data || [])
+      if (isAdmin && supabaseConfigured && user?.id && user.id !== 'local-demo') {
+        const [auditResult, importResult] = await Promise.all([
+          supabase.from('audit_logs').select('id,action,entity_table,entity_id,metadata,created_at').order('created_at', { ascending: false }).limit(20),
+          supabase.from('import_jobs').select('id,filename,source_format,status,counts,created_at,committed_at').order('created_at', { ascending: false }).limit(10),
+        ])
+        if (!auditResult.error) setAuditEvents(auditResult.data || [])
+        if (!importResult.error) setImports(importResult.data || [])
       }
     } catch (problem) {
       setError(problem?.message || 'Could not load recent activity.')
     } finally {
       setActivityLoading(false)
     }
-  }, [isAdmin])
+  }, [isAdmin, user?.id])
 
   useEffect(() => {
     setError('')
@@ -119,8 +129,15 @@ export default function ControlCenterPage() {
     if (!isAdmin) return
     setSaving(true); setError(''); setNotice('')
     try {
+      if (supabaseConfigured && user?.id && user.id !== 'local-demo') {
+        const remoteRows = Object.entries(settings).map(([key, value]) => ({ key, value, updated_by: user.id, updated_at: new Date().toISOString() }))
+        const { error: remoteError } = await supabase.from('app_settings').upsert(remoteRows, { onConflict: 'key' })
+        if (remoteError) throw remoteError
+      }
       await Promise.all(Object.entries(settings).map(([key, value]) => accDb.settings.put({ key, value })))
-      setNotice('Settings saved in this browser. Owner dashboard preferences apply when that account refreshes its view on this device.')
+      setNotice(supabaseConfigured && user?.id && user.id !== 'local-demo'
+        ? 'Settings saved. Owner dashboard preferences are shared through the accounting workspace.'
+        : 'Settings saved locally. Sign in to the connected workspace to share preferences across devices.')
       window.dispatchEvent(new Event('accounting-data-updated'))
     } catch (problem) {
       setError(problem?.message || 'Could not save settings.')
@@ -162,8 +179,9 @@ export default function ControlCenterPage() {
 
   const counts = useMemo(() => ({
     vouchers: activity.length,
+    audit: auditEvents.length,
     imports: imports.length,
-  }), [activity.length, imports.length])
+  }), [activity.length, auditEvents.length, imports.length])
 
   if (!isAdmin) {
     return <>
@@ -223,7 +241,7 @@ export default function ControlCenterPage() {
         </section>}
 
         {section === 'activity' && <div className="grid gap-4 xl:grid-cols-2">
-          <section className="overflow-hidden rounded-[18px] border border-[#e1e8e3] bg-white"><div className="flex items-start justify-between border-b border-[#edf1ed] p-5"><div><h2 className="text-[15px] font-extrabold">Recent accounting entries</h2><p className="mt-1 text-[11px] text-[#82908a]">Latest {counts.vouchers} vouchers available in this browser.</p></div><Activity size={19} className="text-[#0e7a70]" /></div>{activityLoading ? <p className="p-5 text-xs text-[#82908a]">Loading activity…</p> : activity.map((voucher) => <article key={voucher.id} className="flex items-center justify-between gap-3 border-b border-[#edf1ed] p-4 last:border-0"><div className="min-w-0"><strong className="block truncate text-xs text-[#30483e]">{(voucher.voucher_type || 'Voucher').toUpperCase()} · {voucher.voucher_no || 'No voucher number'}</strong><p className="mt-1 truncate text-[11px] text-[#82908a]">{voucher.party_name || voucher.narration || 'Accounting entry'} · {dateLabel(voucher.created_at || voucher.createdAt || voucher.date)}</p></div><strong className="whitespace-nowrap text-xs font-extrabold text-[#30483e]">{money(voucher.amount)}</strong></article>)}{!activityLoading && !activity.length && <p className="p-6 text-center text-xs text-[#82908a]">No vouchers have been recorded in this browser yet.</p>}</section>
+          <section className="overflow-hidden rounded-[18px] border border-[#e1e8e3] bg-white"><div className="flex items-start justify-between border-b border-[#edf1ed] p-5"><div><h2 className="text-[15px] font-extrabold">Recent accounting entries</h2><p className="mt-1 text-[11px] text-[#82908a]">{counts.audit ? counts.audit + ' audit events from the shared workspace' : 'Latest vouchers available in this browser' }.</p></div><Activity size={19} className="text-[#0e7a70]" /></div>{activityLoading ? <p className="p-5 text-xs text-[#82908a]">Loading activity…</p> : auditEvents.length ? auditEvents.map((event) => <article key={event.id} className="flex items-center justify-between gap-3 border-b border-[#edf1ed] p-4 last:border-0"><div className="min-w-0"><strong className="block truncate text-xs text-[#30483e]">{String(event.action || 'Updated').replaceAll('_', ' ')} · {event.entity_table || 'record'}</strong><p className="mt-1 truncate text-[11px] text-[#82908a]">{event.metadata?.filename || event.metadata?.voucher_no || event.entity_id || 'Record change'} · {dateLabel(event.created_at)}</p></div><Activity size={16} className="shrink-0 text-[#0e7a70]" /></article>) : activity.map((voucher) => <article key={voucher.id} className="flex items-center justify-between gap-3 border-b border-[#edf1ed] p-4 last:border-0"><div className="min-w-0"><strong className="block truncate text-xs text-[#30483e]">{(voucher.voucher_type || 'Voucher').toUpperCase()} · {voucher.voucher_no || 'No voucher number'}</strong><p className="mt-1 truncate text-[11px] text-[#82908a]">{voucher.party_name || voucher.narration || 'Accounting entry'} · {dateLabel(voucher.created_at || voucher.createdAt || voucher.date)}</p></div><strong className="whitespace-nowrap text-xs font-extrabold text-[#30483e]">{money(voucher.amount)}</strong></article>)}{!activityLoading && !auditEvents.length && !activity.length && <p className="p-6 text-center text-xs text-[#82908a]">No recent accounting activity is available yet.</p>}</section>
           <section className="overflow-hidden rounded-[18px] border border-[#e1e8e3] bg-white"><div className="flex items-start justify-between border-b border-[#edf1ed] p-5"><div><h2 className="text-[15px] font-extrabold">Tally import history</h2><p className="mt-1 text-[11px] text-[#82908a]">Recent import jobs recorded by Supabase.</p></div><FileSpreadsheet size={19} className="text-[#0e7a70]" /></div>{imports.map((job) => <article key={job.id} className="border-b border-[#edf1ed] p-4 last:border-0"><div className="flex items-center justify-between gap-3"><strong className="truncate text-xs text-[#30483e]">{job.filename}</strong><span className={'rounded-lg px-2 py-1 text-[10px] font-bold ' + (job.status === 'committed' ? 'bg-[#e6f4ee] text-[#0e7669]' : 'bg-[#fff5e8] text-[#9c611c]')}>{job.status}</span></div><p className="mt-1 text-[10px] text-[#82908a]">{dateLabel(job.created_at)} · {job.source_format || 'Tally export'}</p></article>)}{!imports.length && <p className="p-6 text-xs text-[#82908a]">No import history is available, or the import-history table could not be read.</p>}</section>
         </div>}
       </div>
