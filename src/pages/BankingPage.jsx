@@ -140,14 +140,14 @@ export default function BankingPage() {
             <div className="flex items-center gap-2">
               <h1 className="text-2xl sm:text-3xl font-black text-[#172f2c] tracking-tight flex items-center gap-2.5">
                 <Landmark className="w-7 h-7 text-[#0e7a70]" />
-                <span>Cash, Bank & Loan Ledgers</span>
+                <span>Loans & Advances</span>
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#e6f4ee] text-[#0e7669] border border-teal-500/30">
-                Liquid Accounts & Liabilities
+                Borrowings and advances
               </span>
             </div>
             <p className="text-xs sm:text-sm text-[#71827a] mt-1">
-              Live balances, internal contra transfers (F4), and loan liability tracking.
+              Outstanding loans, supplier advances, staff advances, and cash or bank movement tracking.
             </p>
           </div>
 
@@ -174,40 +174,24 @@ export default function BankingPage() {
           )}
         </div>
 
-        {/* 4 Cards: Cash, Bank, Loans Payable, Advances */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-2xl border border-[#e1e8e3] shadow-md">
-            <span className="text-xs font-bold text-[#71827a] uppercase tracking-wider block mb-1">Total Cash-in-Hand</span>
-            <div className="text-2xl font-black text-[#172f2c]">₹{totalCash.toLocaleString()}</div>
-            <div className="text-[11px] text-[#71827a] mt-2 pt-2 border-t border-[#e1e8e3]">
-              Counter drawer & petty cash
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-[#e1e8e3] shadow-md">
-            <span className="text-xs font-bold text-[#0e7a70] uppercase tracking-wider block mb-1">Total Bank Accounts</span>
-            <div className="text-2xl font-black text-[#0e7a70]">₹{totalBank.toLocaleString()}</div>
-            <div className="text-[11px] text-[#71827a] mt-2 pt-2 border-t border-[#e1e8e3]">
-              Across {bankAccounts.length} operational bank accounts
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-[#e1e8e3] shadow-md">
-            <span className="text-xs font-bold text-[#a6651e] uppercase tracking-wider block mb-1">Loans & Borrowings</span>
-            <div className="text-2xl font-black text-[#a6651e]">₹{totalLoansPayable.toLocaleString()}</div>
-            <div className="text-[11px] text-[#71827a] mt-2 pt-2 border-t border-[#e1e8e3]">
-              Bank term loans & private debts
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-[#e1e8e3] shadow-md">
-            <span className="text-xs font-bold text-[#0e7a70] uppercase tracking-wider block mb-1">Loans & Advances (Given)</span>
-            <div className="text-2xl font-black text-[#0e7a70]">₹{totalLoansReceivable.toLocaleString()}</div>
-            <div className="text-[11px] text-[#71827a] mt-2 pt-2 border-t border-[#e1e8e3]">
-              Staff advances & security deposits
-            </div>
-          </div>
-        </div>
+        {/* Loans and advances summary - matches the Owner view reference */}
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <article className="rounded-[18px] border border-[#c9e4d8] bg-[#e7f5ef] p-5">
+            <span className="block text-xs font-bold uppercase tracking-wider text-[#526f62]">Net you owe</span>
+            <strong className="mt-2 block text-[28px] font-extrabold tracking-tight text-[#153c34]">₹{(totalLoansPayable - totalLoansReceivable).toLocaleString('en-IN')}</strong>
+            <p className="mt-2 text-[11px] text-[#71877c]">Loans payable less advances given</p>
+          </article>
+          <article className="rounded-[18px] border border-[#e1e8e3] bg-white p-5">
+            <span className="block text-xs font-bold uppercase tracking-wider text-[#9a6116]">Loans you owe</span>
+            <strong className="mt-2 block text-[28px] font-extrabold tracking-tight text-[#a6651e]">₹{totalLoansPayable.toLocaleString('en-IN')}</strong>
+            <p className="mt-2 text-[11px] text-[#82908a]">Loan liabilities and borrowings</p>
+          </article>
+          <article className="rounded-[18px] border border-[#e1e8e3] bg-white p-5">
+            <span className="block text-xs font-bold uppercase tracking-wider text-[#0e7669]">Advances given</span>
+            <strong className="mt-2 block text-[28px] font-extrabold tracking-tight text-[#0e7a70]">₹{totalLoansReceivable.toLocaleString('en-IN')}</strong>
+            <p className="mt-2 text-[11px] text-[#82908a]">Staff advances and supplier deposits</p>
+          </article>
+        </section>
 
         {/* Bank & Cash Accounts List */}
         <div className="bg-white rounded-2xl p-5 border border-[#e1e8e3] shadow-lg space-y-4">
@@ -215,9 +199,9 @@ export default function BankingPage() {
             <div>
               <h2 className="text-base font-bold text-[#172f2c] flex items-center gap-2">
                 <Landmark className="w-5 h-5 text-[#0e7a70]" />
-                <span>Liquid Cash & Bank Ledgers</span>
+                <span>Cash & bank balances</span>
               </h2>
-              <p className="text-xs text-[#71827a]">Running balances updated continuously by receipts, payments, and contra entries</p>
+              <p className="text-xs text-[#71827a]">Cash ₹{totalCash.toLocaleString('en-IN')} · Bank ₹{totalBank.toLocaleString('en-IN')} · balances updated by receipts, payments, and contra entries</p>
             </div>
           </div>
 
