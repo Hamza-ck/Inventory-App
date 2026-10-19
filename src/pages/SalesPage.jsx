@@ -86,23 +86,23 @@ export default function SalesPage() {
   const totalUidAccounts = filteredSales.filter((v) => Boolean(v.party_uid)).length
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16">
+    <div className="min-h-screen bg-[#f4f7f4] text-[#172f2c] font-sans pb-28 lg:pb-0">
       <Nav />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+      <main className="min-h-screen bg-[#f4f7f4] px-4 pb-28 pt-5 text-[#172f2c] sm:px-6 lg:ml-64 lg:w-[calc(100%-16rem)] lg:px-9 lg:pb-8 lg:pt-8 space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
-                <Receipt className="w-7 h-7 text-emerald-500" />
+              <h1 className="text-2xl sm:text-3xl font-black text-[#172f2c] tracking-tight flex items-center gap-2.5">
+                <Receipt className="w-7 h-7 text-[#0e7a70]" />
                 <span>Daily Sales & Invoicing</span>
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#e6f4ee] text-[#0e7a70] border border-[#c6e5d9]">
                 F8 Sales
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            <p className="text-xs sm:text-sm text-[#71827a] mt-1">
               Invoices with closing due balance automatically receive permanent Customer UIDs.
             </p>
           </div>
@@ -120,62 +120,62 @@ export default function SalesPage() {
         </div>
 
         {/* UID Logic Informational Banner */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/60 to-indigo-950/60 border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/60 to-indigo-950/60 border border-[#c6e5d9] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600/30 text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/30">
+            <div className="w-9 h-9 rounded-xl bg-blue-600/30 text-[#0e7a70] flex items-center justify-center shrink-0 border border-[#c6e5d9]">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <span className="font-bold text-white block">TallyFlow Permanent Customer UID Engine</span>
-              <span className="text-slate-300">
+              <span className="font-bold text-[#172f2c] block">TallyFlow Permanent Customer UID Engine</span>
+              <span className="text-[#52685e]">
                 Invoices with closing due balance get permanent UID (e.g. <code>UID-CUST-1001</code>). If paid upfront, settled directly into sales.
               </span>
             </div>
           </div>
-          <div className="shrink-0 bg-blue-900/60 px-3 py-1.5 rounded-lg border border-blue-500/40 font-mono text-blue-300 font-bold">
+          <div className="shrink-0 bg-blue-900/60 px-3 py-1.5 rounded-lg border border-[#b8ddd0] font-mono text-[#0e7669] font-bold">
             {totalUidAccounts} Invoices Linked via UID
           </div>
         </div>
 
         {/* Summary Metrics */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Total Sales Revenue</span>
-            <div className="text-2xl font-black text-white">₹{totalSalesAmount.toLocaleString()}</div>
-            <div className="text-[11px] text-slate-400 mt-1">From {filteredSales.length} invoices</div>
+          <div className="bg-white p-4 rounded-2xl border border-[#e1e8e3] shadow-md">
+            <span className="text-xs font-bold text-[#71827a] uppercase tracking-wider block mb-1">Total Sales Revenue</span>
+            <div className="text-2xl font-black text-[#172f2c]">₹{totalSalesAmount.toLocaleString()}</div>
+            <div className="text-[11px] text-[#71827a] mt-1">From {filteredSales.length} invoices</div>
           </div>
 
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider block mb-1">Settled / Paid Amount</span>
-            <div className="text-2xl font-black text-emerald-400">₹{totalPaidAmount.toLocaleString()}</div>
-            <div className="text-[11px] text-slate-400 mt-1">Cash & Bank Collections</div>
+          <div className="bg-white p-4 rounded-2xl border border-[#e1e8e3] shadow-md">
+            <span className="text-xs font-bold text-[#0e7a70] uppercase tracking-wider block mb-1">Settled / Paid Amount</span>
+            <div className="text-2xl font-black text-[#0e7a70]">₹{totalPaidAmount.toLocaleString()}</div>
+            <div className="text-[11px] text-[#71827a] mt-1">Cash & Bank Collections</div>
           </div>
 
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-rose-400 uppercase tracking-wider block mb-1">Closing Due (Credit Debtors)</span>
-            <div className="text-2xl font-black text-rose-400">₹{totalDueAmount.toLocaleString()}</div>
-            <div className="text-[11px] text-slate-400 mt-1">Circulating through Customer UIDs</div>
+          <div className="bg-white p-4 rounded-2xl border border-[#e1e8e3] shadow-md">
+            <span className="text-xs font-bold text-[#ad5545] uppercase tracking-wider block mb-1">Closing Due (Credit Debtors)</span>
+            <div className="text-2xl font-black text-[#ad5545]">₹{totalDueAmount.toLocaleString()}</div>
+            <div className="text-[11px] text-[#71827a] mt-1">Circulating through Customer UIDs</div>
           </div>
         </div>
 
         {/* Filter Toolbar */}
-        <div className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
+        <div className="bg-white p-3.5 rounded-2xl border border-[#e1e8e3] flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
             <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#71827a]" />
               <input
                 type="text"
                 placeholder="Search invoice #, customer name, permanent UID..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">All Settlements</option>
               <option value="paid">Fully Settled (Cash)</option>
@@ -185,7 +185,7 @@ export default function SalesPage() {
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
-              className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">All Dates</option>
               <option value="today">Today</option>
@@ -193,16 +193,16 @@ export default function SalesPage() {
             </select>
           </div>
 
-          <div className="text-xs text-slate-400 font-semibold">
+          <div className="text-xs text-[#71827a] font-semibold">
             Showing {filteredSales.length} Invoices
           </div>
         </div>
 
         {/* Sales Table */}
-        <div className="bg-slate-800/90 rounded-2xl border border-slate-700/80 shadow-lg overflow-hidden">
+        <div className="bg-white rounded-2xl border border-[#e1e8e3] shadow-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-700">
+              <thead className="bg-[#f8fbf9] text-[#71827a] font-bold uppercase text-[10px] border-b border-[#e1e8e3]">
                 <tr>
                   <th className="py-3 px-3">Date</th>
                   <th className="py-3 px-3">Invoice No.</th>
@@ -215,50 +215,50 @@ export default function SalesPage() {
                   <th className="py-3 px-3 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-700/60 font-medium">
+              <tbody className="divide-y divide-[#e8eee9] font-medium">
                 {filteredSales.length > 0 ? (
                   filteredSales.map((v) => {
                     const hasDue = Number(v.due_amount || 0) > 0
                     return (
-                      <tr key={v.id} className="hover:bg-slate-700/40 transition-colors">
-                        <td className="py-3 px-3 text-slate-300 font-mono whitespace-nowrap">{v.date}</td>
-                        <td className="py-3 px-3 font-mono font-bold text-white whitespace-nowrap">{v.voucher_no}</td>
-                        <td className="py-3 px-3 font-semibold text-white">
+                      <tr key={v.id} className="hover:bg-[#f3f8f5] transition-colors">
+                        <td className="py-3 px-3 text-[#52685e] font-mono whitespace-nowrap">{v.date}</td>
+                        <td className="py-3 px-3 font-mono font-bold text-[#172f2c] whitespace-nowrap">{v.voucher_no}</td>
+                        <td className="py-3 px-3 font-semibold text-[#172f2c]">
                           <div>{v.party_name || 'Cash Customer'}</div>
                           {v.payment_mode && (
-                            <span className="text-[10px] text-slate-400 font-normal">via {v.payment_mode}</span>
+                            <span className="text-[10px] text-[#71827a] font-normal">via {v.payment_mode}</span>
                           )}
                         </td>
                         <td className="py-3 px-3 whitespace-nowrap">
                           {v.party_uid ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-mono font-bold border border-blue-500/40">
-                              <ShieldCheck className="w-3 h-3 text-blue-400" />
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#e6f4ee] text-[#0e7669] text-[10px] font-mono font-bold border border-[#b8ddd0]">
+                              <ShieldCheck className="w-3 h-3 text-[#0e7a70]" />
                               <span>{v.party_uid}</span>
                             </span>
                           ) : (
-                            <span className="text-slate-500 text-[10px] italic">Walk-in Direct</span>
+                            <span className="text-[#8a9991] text-[10px] italic">Walk-in Direct</span>
                           )}
                         </td>
-                        <td className="py-3 px-3 text-slate-400 max-w-xs truncate">
+                        <td className="py-3 px-3 text-[#71827a] max-w-xs truncate">
                           {Array.isArray(v.items) && v.items.length > 0 ? (
                             <span>{v.items.map((i) => `${i.name} (${i.qty})`).join(', ')}</span>
                           ) : (
                             <span>Direct Sales</span>
                           )}
                         </td>
-                        <td className="py-3 px-3 text-right font-black text-white whitespace-nowrap">
+                        <td className="py-3 px-3 text-right font-black text-[#172f2c] whitespace-nowrap">
                           ₹{Number(v.amount || 0).toLocaleString()}
                         </td>
-                        <td className="py-3 px-3 text-right text-emerald-400 font-bold whitespace-nowrap">
+                        <td className="py-3 px-3 text-right text-[#0e7a70] font-bold whitespace-nowrap">
                           ₹{Number(v.paid_amount || 0).toLocaleString()}
                         </td>
                         <td className="py-3 px-3 text-right font-bold whitespace-nowrap">
                           {hasDue ? (
-                            <span className="text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                            <span className="text-[#ad5545] bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
                               ₹{Number(v.due_amount).toLocaleString()}
                             </span>
                           ) : (
-                            <span className="text-emerald-400 font-normal text-[11px]">Fully Paid</span>
+                            <span className="text-[#0e7a70] font-normal text-[11px]">Fully Paid</span>
                           )}
                         </td>
                         <td className="py-3 px-3 text-center whitespace-nowrap">
@@ -266,7 +266,7 @@ export default function SalesPage() {
                             <button
                               type="button"
                               onClick={() => { setSelectedInvoice(v); setIsInvoiceModalOpen(true) }}
-                              className="p-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white transition-colors"
+                              className="p-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-[#0e7669] hover:text-white transition-colors"
                               title="Print / View Tax Invoice"
                             >
                               <Printer className="w-3.5 h-3.5" />
@@ -275,7 +275,7 @@ export default function SalesPage() {
                               <button
                                 type="button"
                                 onClick={() => { setEditingVoucher(v); setIsVoucherModalOpen(true) }}
-                                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-[#52685e] hover:text-[#172f2c] transition-colors"
                                 title="Modify Invoice (Tally edit)"
                               >
                                 <Edit3 className="w-3.5 h-3.5" />
@@ -288,7 +288,7 @@ export default function SalesPage() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-500">
+                    <td colSpan={9} className="py-8 text-center text-[#8a9991]">
                       No sales invoices found matching your filter criteria.
                     </td>
                   </tr>
