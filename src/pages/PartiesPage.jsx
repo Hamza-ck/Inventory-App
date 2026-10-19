@@ -201,6 +201,22 @@ export default function PartiesPage() {
     }).sort((a, b) => new Date(a.date || a.createdAt) - new Date(b.date || b.createdAt))
   }, [vouchers, statementParty])
 
+  const agingTotals = useMemo(() => {
+    const totals = { '0–30d': 0, '31–60d': 0, '60d+': 0 }
+    parties.filter((party) => party.type === activeTab).forEach((party) => {
+      const related = vouchers.filter((voucher) => Number(voucher.due_amount) > 0 && (
+        (voucher.party_id && String(voucher.party_id) === String(party.id)) ||
+        (voucher.party_uid && party.uid && voucher.party_uid === party.uid) ||
+        (voucher.party_name && party.name && voucher.party_name.toLowerCase().trim() === party.name.toLowerCase().trim())
+      )).sort((a, b) => new Date(a.date || a.created_at || 0) - new Date(b.date || b.created_at || 0))
+      const startDate = related[0]?.date || party.created_at || new Date().toISOString()
+      const days = Math.max(0, Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000))
+      const band = days > 60 ? '60d+' : days > 30 ? '31–60d' : '0–30d'
+      totals[band] += Number(party.current_balance) || 0
+    })
+    return totals
+  }, [parties, vouchers, activeTab])
+
   return (
     <div className="min-h-screen bg-[#f4f7f4] text-[#172f2c] font-sans pb-28 lg:pb-0">
       <Nav />
@@ -235,58 +251,23 @@ export default function PartiesPage() {
           )}
         </div>
 
-        {/* Tab & Metric Overview Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div
-            onClick={() => setActiveTab('debtor')}
-            className={`p-5 rounded-2xl border transition-all cursor-pointer ${
-              activeTab === 'debtor'
-                ? 'bg-[#e7f5ef] border-[#b8ddd0] shadow-lg shadow-[#0e7a70]/10'
-                : 'bg-white border-[#e1e8e3] hover:border-[#d3e1d8]'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#0e7a70] flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-[#0e7a70]" />
-                <span>Sundry Debtors (Receivables)</span>
-              </span>
-              <span className="px-2 py-0.5 bg-[#e6f4ee] text-[#0e7669] rounded text-xs font-bold">
-                {parties.filter((p) => p.type === 'debtor').length} Parties
-              </span>
+        {/* Separate Debtors/Creditors view with aging summary */}
+        <section className="rounded-[18px] border border-[#e1e8e3] bg-white p-5 sm:p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-[11px] font-bold text-[#71827a]">{activeTab === 'debtor' ? 'Total owed to you' : 'Total you owe'}</p>
+              <strong className="mt-1 block text-[31px] font-extrabold tracking-tight text-[#19332c]">₹{(activeTab === 'debtor' ? totalReceivables : totalPayables).toLocaleString('en-IN')}</strong>
+              <p className="mt-1 text-[11px] text-[#82908a]">{parties.filter((party) => party.type === activeTab).length} {activeTab === 'debtor' ? 'customers with receivables' : 'suppliers with payables'}</p>
             </div>
-            <div className="text-2xl font-black text-[#172f2c] mt-2">
-              ₹{totalReceivables.toLocaleString()}
+            <div className="flex w-full rounded-xl border border-[#e1e9e3] bg-[#f1f6f2] p-1 sm:w-auto">
+              <button type="button" onClick={() => setActiveTab('debtor')} className={'flex-1 rounded-lg px-4 py-2 text-xs font-bold sm:flex-none ' + (activeTab === 'debtor' ? 'bg-white text-[#0e7669] shadow-sm' : 'text-[#63776e]')}>Debtors</button>
+              <button type="button" onClick={() => setActiveTab('creditor')} className={'flex-1 rounded-lg px-4 py-2 text-xs font-bold sm:flex-none ' + (activeTab === 'creditor' ? 'bg-white text-[#0e7669] shadow-sm' : 'text-[#63776e]')}>Creditors</button>
             </div>
-            <p className="text-xs text-[#71827a] mt-1">
-              Money due to you from customers with permanent UIDs
-            </p>
           </div>
-
-          <div
-            onClick={() => setActiveTab('creditor')}
-            className={`p-5 rounded-2xl border transition-all cursor-pointer ${
-              activeTab === 'creditor'
-                ? 'bg-[#fff3ef] border-[#efc9be] shadow-lg shadow-[#b45b10]/10'
-                : 'bg-white border-[#e1e8e3] hover:border-[#d3e1d8]'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#ad5545] flex items-center gap-1.5">
-                <Building2 className="w-4 h-4 text-[#ad5545]" />
-                <span>Sundry Creditors (Payables)</span>
-              </span>
-              <span className="px-2 py-0.5 bg-[#fff0eb] text-[#a94a3f] rounded text-xs font-bold">
-                {parties.filter((p) => p.type === 'creditor').length} Parties
-              </span>
-            </div>
-            <div className="text-2xl font-black text-[#172f2c] mt-2">
-              ₹{totalPayables.toLocaleString()}
-            </div>
-            <p className="text-xs text-[#71827a] mt-1">
-              Money owed to suppliers for materials and goods
-            </p>
+          <div className="mt-5 grid grid-cols-3 gap-2 border-t border-[#edf1ed] pt-4 sm:gap-4">
+            {Object.entries(agingTotals).map(([label, amount], index) => <div key={label} className="min-w-0"><p className="text-[10px] text-[#82908a]">{label}</p><strong className={'mt-1 block truncate text-sm font-extrabold sm:text-base ' + (index === 2 && amount > 0 ? 'text-[#a9563b]' : 'text-[#30483e]')}>₹{amount.toLocaleString('en-IN')}</strong></div>)}
           </div>
-        </div>
+        </section>
 
         {/* Filter Toolbar */}
         <div className="bg-white p-3.5 rounded-2xl border border-[#e1e8e3] flex items-center justify-between gap-3">
@@ -312,6 +293,10 @@ export default function PartiesPage() {
             currentList.map((party) => {
               const due = Number(party.current_balance || 0)
               const hasDue = due > 0
+              const phoneDigits = String(party.phone || '').replace(/\D/g, '')
+              const reminderText = encodeURIComponent(party.type === 'debtor'
+                ? 'Friendly payment reminder: your outstanding balance is ₹' + due.toLocaleString('en-IN') + '. Please let us know when it can be settled. Thank you.'
+                : 'Payment update: our current payable balance is ₹' + due.toLocaleString('en-IN') + '. Please contact us if you need to reconcile the account. Thank you.')
               return (
                 <div
                   key={party.id}
@@ -364,8 +349,9 @@ export default function PartiesPage() {
                   </div>
 
                   {/* Actions */}
-                  <div className="pt-3 border-t border-[#e1e8e3] flex items-center justify-between gap-2">
-                    <button
+                  <div className="pt-3 border-t border-[#e1e8e3] flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
                       type="button"
                       onClick={() => { setStatementParty(party); setIsStatementOpen(true) }}
                       className="px-3 py-1.5 rounded-xl bg-[#f4f8f5] hover:bg-[#edf5f0] text-[#435b52] text-xs font-semibold flex items-center gap-1.5 transition-colors"
@@ -373,7 +359,10 @@ export default function PartiesPage() {
                     >
                       <History className="w-3.5 h-3.5 text-[#0e7a70]" />
                       <span>Statement</span>
-                    </button>
+                      </button>
+                      {party.phone && <a href={'tel:' + party.phone} className="inline-flex items-center gap-1.5 rounded-xl border border-[#dce6df] bg-white px-3 py-1.5 text-xs font-semibold text-[#36564b] no-underline"><Phone className="h-3.5 w-3.5" />Call</a>}
+                      {phoneDigits && <a href={'https://wa.me/' + phoneDigits + '?text=' + reminderText} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl bg-[#e6f4ee] px-3 py-1.5 text-xs font-bold text-[#0e7669] no-underline">WhatsApp reminder</a>}
+                    </div>
 
                     <div className="flex items-center gap-2">
                       {isAdmin && (
