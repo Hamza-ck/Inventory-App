@@ -261,7 +261,7 @@ export default function MaterialsPage() {
                 <Boxes className="w-7 h-7 text-[#7662a8]" />
                 <span>Materials Stock & Valuation</span>
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-[#7662a8] border border-purple-500/30">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#f0ecf8] text-[#7662a8] border border-[#ded4ee]">
                 Pure Material-Wise (No Models)
               </span>
             </div>
@@ -301,7 +301,7 @@ export default function MaterialsPage() {
                 <button
                   type="button"
                   onClick={startAdd}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-600/30 flex items-center gap-1.5 transition-all active:scale-95"
+                  className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-[#0e7a70] hover:to-[#07675e] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-1.5 transition-all active:scale-95"
                 >
                   <Plus className="w-4 h-4" />
                   <span>+ Add Material</span>
@@ -442,7 +442,7 @@ export default function MaterialsPage() {
                             <button
                               type="button"
                               onClick={() => { setMovementMaterial(mat); setIsMovementModalOpen(true) }}
-                              className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-[#52685e] hover:text-[#172f2c] transition-colors"
+                              className="p-1.5 rounded-lg bg-[#f4f8f5] hover:bg-[#e8f1eb] text-[#52685e] hover:text-[#172f2c] transition-colors"
                               title="Stock Inward/Outward Movements"
                             >
                               <History className="w-3.5 h-3.5 text-[#0e7a70]" />
@@ -452,7 +452,7 @@ export default function MaterialsPage() {
                                 <button
                                   type="button"
                                   onClick={() => startEdit(mat)}
-                                  className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-[#52685e] hover:text-[#172f2c] transition-colors"
+                                  className="p-1.5 rounded-lg bg-[#f4f8f5] hover:bg-[#e8f1eb] text-[#52685e] hover:text-[#172f2c] transition-colors"
                                   title="Edit Material"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
@@ -460,7 +460,7 @@ export default function MaterialsPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(mat.id)}
-                                  className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-[#ad5545] hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-[#fff0eb] hover:bg-[#fae1d8] text-[#ad5545] hover:text-white transition-colors"
                                   title="Delete Material"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -616,7 +616,7 @@ export default function MaterialsPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-[#172f2c] text-xs font-bold shadow-md shadow-purple-600/30"
+                  className="px-5 py-2 rounded-xl bg-[#0e7a70] hover:bg-[#086c63] text-[#172f2c] text-xs font-bold shadow-md shadow-[#0e7a70]/15"
                 >
                   {saving ? 'Saving...' : 'Save Material'}
                 </button>
@@ -628,7 +628,7 @@ export default function MaterialsPage() {
 
       {/* Material Inward/Outward Movements Modal */}
       {isMovementModalOpen && movementMaterial && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#102b25]/80 backdrop-blur-xs">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -657,7 +657,7 @@ export default function MaterialsPage() {
                     <th className="py-2.5 px-3 text-right">Inward / Outward Qty</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800 font-medium">
+                <tbody className="divide-y divide-[#e8eee9] font-medium">
                   {materialMovements.length > 0 ? (
                     materialMovements.map((m, i) => (
                       <tr key={i} className="hover:bg-[#f3f8f5]">
