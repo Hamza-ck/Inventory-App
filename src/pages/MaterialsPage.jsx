@@ -377,7 +377,18 @@ export default function MaterialsPage() {
         </div>
 
         {/* Materials Table */}
-        <div className="bg-white rounded-2xl border border-[#e1e8e3] shadow-lg overflow-hidden">
+        <section className="grid gap-3 lg:hidden" aria-label="Inventory items">
+          {loading ? <div className="rounded-2xl border border-[#e1e8e3] bg-white p-6 text-center text-xs text-[#71827a]">Loading inventory…</div> : filtered.length ? filtered.map((mat) => {
+            const isLow = Number(mat.current_qty || 0) <= Number(mat.reorder_threshold || 0)
+            const value = (Number(mat.current_qty) || 0) * (Number(mat.purchase_rate) || 0)
+            return <article key={mat.id} className="rounded-2xl border border-[#e1e8e3] bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="text-sm font-extrabold text-[#203a31]">{mat.name}</h2><p className="mt-1 truncate text-[10px] font-semibold text-[#82908a]">{mat.sku} · {mat.category || 'General'}</p></div><span className={'shrink-0 rounded-lg px-2 py-1 text-[9px] font-extrabold ' + (Number(mat.current_qty) <= 0 ? 'bg-[#ffebeb] text-[#bf3b38]' : isLow ? 'bg-[#fff1de] text-[#ad650f]' : 'bg-[#e5f7ee] text-[#0d7864]')}>{Number(mat.current_qty) <= 0 ? 'Out of stock' : isLow ? 'Low stock' : 'Healthy'}</span></div>
+              <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[#edf1ed] pt-3"><div><p className="text-[10px] text-[#82908a]">Available stock</p><strong className="mt-1 block text-sm font-extrabold text-[#203a31]">{mat.current_qty} <span className="text-[10px] font-semibold text-[#82908a]">{mat.unit || 'pcs'}</span></strong></div><div className="text-right"><p className="text-[10px] text-[#82908a]">Stock value</p><strong className="mt-1 block text-sm font-extrabold text-[#203a31]">₹{value.toLocaleString('en-IN')}</strong></div></div>
+              <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => { setMovementMaterial(mat); setIsMovementModalOpen(true) }} className="flex-1 rounded-lg border border-[#dce6df] bg-[#f8fbf9] px-3 py-2 text-xs font-bold text-[#36564b]">Movement</button>{isAdmin && <><button type="button" onClick={() => startEdit(mat)} className="rounded-lg bg-[#0d7c71] px-3 py-2 text-xs font-bold text-white">Edit</button><button type="button" onClick={() => handleDelete(mat.id)} className="rounded-lg border border-[#f0d1c7] bg-[#fff7f4] px-3 py-2 text-xs font-bold text-[#a9563b]">Delete</button></>}</div>
+            </article>
+          }) : <div className="rounded-2xl border border-[#e1e8e3] bg-white p-7 text-center text-xs text-[#82908a]">No stock items match these filters.</div>}
+        </section>
+        <div className="hidden lg:block bg-white rounded-2xl border border-[#e1e8e3] shadow-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-[#f8fbf9] text-[#71827a] font-bold uppercase text-[10px] border-b border-[#e1e8e3]">
