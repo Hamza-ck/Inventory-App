@@ -453,7 +453,7 @@ export default function BankingPage() {
                   placeholder="e.g. ICICI Bank Current A/c"
                   value={newAccForm.name}
                   onChange={(e) => setNewAccForm({ ...newAccForm, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
                 />
               </div>
 
@@ -494,7 +494,7 @@ export default function BankingPage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-600/30"
+                  className="px-5 py-2 rounded-xl bg-[#0e7a70] hover:bg-[#086c63] text-white text-xs font-bold shadow-md shadow-[#0e7a70]/15"
                 >
                   Save Account
                 </button>
