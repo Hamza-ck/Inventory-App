@@ -1,87 +1,72 @@
-import { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { supabase, supabaseConfigured } from '../lib/supabaseClient'
 import { initDefaultAccountingData } from '../lib/accountingDb'
 
 const AuthContext = createContext(null)
+const isDevDemo = import.meta.env.DEV && import.meta.env.VITE_DEMO_MODE === 'true' && !supabaseConfigured
+const demoRole = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'owner' ? 'owner' : 'admin'
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
+  const [profileRole, setProfileRole] = useState('owner')
   const [loading, setLoading] = useState(true)
 
-  // Role state: 'admin' (Me as an Admin - Full Data Entry) vs 'owner' (Owner - Read and Track Only)
-  const [role, setRoleState] = useState(() => {
-    return localStorage.getItem('tally_saas_role') || 'admin'
-  })
-
   useEffect(() => {
-    // Initialize default accounting data (ledgers, materials, debtors with UIDs, vouchers)
-    initDefaultAccountingData().catch((err) => console.warn('Init DB warning:', err))
-
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      if (data.session) {
-        fetchProfileRole(data.session.user.id)
-      } else {
-        setLoading(false)
+    let active = true
+    async function bootstrap() {
+      if (isDevDemo) {
+        try { await initDefaultAccountingData() } catch (error) { console.warn('Demo data initialization:', error) }
+        if (active) setLoading(false)
+        return
       }
-    })
-
+      const { data, error } = await supabase.auth.getSession()
+      if (!active) return
+      if (error) console.warn('Session lookup failed:', error.message)
+      setSession(data?.session || null)
+      if (data?.session?.user?.id) await fetchProfileRole(data.session.user.id)
+      else { setProfileRole('owner'); setLoading(false) }
+    }
+    bootstrap()
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
-      if (newSession) {
-        fetchProfileRole(newSession.user.id)
-      } else {
-        setLoading(false)
-      }
+      if (newSession?.user?.id) fetchProfileRole(newSession.user.id)
+      else { setProfileRole('owner'); setLoading(false) }
     })
-
-    return () => listener.subscription.unsubscribe()
+    return () => { active = false; listener.subscription.unsubscribe() }
   }, [])
 
   async function fetchProfileRole(userId) {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single()
-      if (!error && data?.role) {
-        // Map old roles if needed
-        const mappedRole = data.role === 'owner' ? 'owner' : 'admin'
-        setRoleState(mappedRole)
-        localStorage.setItem('tally_saas_role', mappedRole)
-      }
-    } catch {
-      // offline safe
+      const { data, error } = await supabase.from('profiles').select('role').eq('id', userId).maybeSingle()
+      // Unknown roles and failed profile reads fail closed as read-only.
+      setProfileRole(!error && data?.role === 'admin' ? 'admin' : 'owner')
+    } catch (error) {
+      console.warn('Unable to load role; applying read-only access:', error)
+      setProfileRole('owner')
     } finally {
       setLoading(false)
     }
   }
 
-  function setRole(newRole) {
-    setRoleState(newRole)
-    localStorage.setItem('tally_saas_role', newRole)
-  }
-
-  const value = {
-    session,
-    user: session?.user || { id: 'local-admin', email: 'admin@tallysaas.com', user_metadata: { full_name: 'Super Admin' } },
-    role,
-    setRole,
-    isAdmin: role === 'admin',
-    isOwner: role === 'owner',
-    loading,
-    signOut: () => {
-      supabase.auth.signOut()
-      setSession(null)
-    },
-  }
+  const value = useMemo(() => {
+    const user = session?.user || (isDevDemo ? { id: 'local-demo', email: 'local-demo@tallyflow.local', user_metadata: { full_name: demoRole === 'owner' ? 'Demo Owner' : 'Demo Admin' } } : null)
+    const role = session ? profileRole : isDevDemo ? demoRole : 'owner'
+    return {
+      session, user, role, isAdmin: role === 'admin', isOwner: role !== 'admin',
+      isDemo: isDevDemo, loading,
+      signOut: async () => {
+        if (session) await supabase.auth.signOut()
+        setSession(null)
+        setProfileRole('owner')
+      },
+    }
+  }, [session, profileRole, loading])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
-  return ctx
+  const context = useContext(AuthContext)
+  if (!context) throw new Error('useAuth must be used inside AuthProvider')
+  return context
 }

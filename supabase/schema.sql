@@ -12,7 +12,7 @@
 -- 1. User Profiles & Roles
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
-  role text not null default 'admin' check (role in ('admin', 'owner', 'employee')),
+  role text not null default 'owner' check (role in ('admin', 'owner', 'employee')),
   full_name text,
   created_at timestamptz default now()
 );
@@ -42,6 +42,8 @@ alter table public.materials drop column if exists model;
 -- Ensure role check allows admin, owner, employee
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check check (role in ('admin', 'owner', 'employee'));
+-- New profiles are read-only until an Admin explicitly promotes them.
+alter table public.profiles alter column role set default 'owner';
 
 -- 3. Chart of Accounts Ledgers (Cash, Bank Accounts, Loans, Expenses, Incomes)
 create table if not exists public.ledgers (
@@ -100,10 +102,17 @@ create index if not exists idx_parties_uid on public.parties(uid);
 create index if not exists idx_materials_sku on public.materials(sku);
 
 -- ==============================================================================
--- Row-Level Security (RLS)
--- Rule 3: Owner only can read and track.
--- Rule 4: Me as an Admin have full access of Data entry to anything.
+-- Row-Level Security (RLS) and import staging
+-- Admin: full control. Owner/employee: SELECT only.
 -- ==============================================================================
+
+create or replace function public.is_admin()
+returns boolean language sql stable security definer set search_path = public, pg_temp
+as $$
+  select exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin');
+$$;
+revoke all on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.materials enable row level security;
@@ -111,68 +120,202 @@ alter table public.ledgers enable row level security;
 alter table public.parties enable row level security;
 alter table public.vouchers enable row level security;
 
--- Profiles Policies
 drop policy if exists "Profiles are readable by authenticated users" on public.profiles;
-create policy "Profiles are readable by authenticated users" on public.profiles
-  for select using (auth.role() = 'authenticated');
-
 drop policy if exists "Admin manages all profiles" on public.profiles;
-create policy "Admin manages all profiles" on public.profiles
-  for all using (
-    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
-  );
+drop policy if exists "Authenticated users can read materials" on public.materials;
+drop policy if exists "Authenticated users can read ledgers" on public.ledgers;
+drop policy if exists "Authenticated users can read parties" on public.parties;
+drop policy if exists "Authenticated users can read vouchers" on public.vouchers;
+drop policy if exists "Admin can insert materials" on public.materials;
+drop policy if exists "Admin can update materials" on public.materials;
+drop policy if exists "Admin can delete materials" on public.materials;
+drop policy if exists "Admin can insert ledgers" on public.ledgers;
+drop policy if exists "Admin can update ledgers" on public.ledgers;
+drop policy if exists "Admin can insert parties" on public.parties;
+drop policy if exists "Admin can update parties" on public.parties;
+drop policy if exists "Admin can delete parties" on public.parties;
+drop policy if exists "Admin can insert vouchers" on public.vouchers;
+drop policy if exists "Admin can update vouchers" on public.vouchers;
+drop policy if exists "Admin can delete vouchers" on public.vouchers;
+drop policy if exists "Profiles: user reads self or Admin reads all" on public.profiles;
+drop policy if exists "Profiles: Admin manages profiles" on public.profiles;
+drop policy if exists "Authenticated users read materials" on public.materials;
+drop policy if exists "Admin inserts materials" on public.materials;
+drop policy if exists "Admin updates materials" on public.materials;
+drop policy if exists "Admin deletes materials" on public.materials;
+drop policy if exists "Authenticated users read ledgers" on public.ledgers;
+drop policy if exists "Admin inserts ledgers" on public.ledgers;
+drop policy if exists "Admin updates ledgers" on public.ledgers;
+drop policy if exists "Admin deletes ledgers" on public.ledgers;
+drop policy if exists "Authenticated users read parties" on public.parties;
+drop policy if exists "Admin inserts parties" on public.parties;
+drop policy if exists "Admin updates parties" on public.parties;
+drop policy if exists "Admin deletes parties" on public.parties;
+drop policy if exists "Authenticated users read vouchers" on public.vouchers;
+drop policy if exists "Admin inserts vouchers" on public.vouchers;
+drop policy if exists "Admin updates vouchers" on public.vouchers;
+drop policy if exists "Admin deletes vouchers" on public.vouchers;
 
--- Helper functions to check roles
-create or replace function public.is_admin() returns boolean as $$
-  select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin');
-$$ language sql security definer;
+create policy "Profiles: user reads self or Admin reads all" on public.profiles
+  for select to authenticated using (id = auth.uid() or public.is_admin());
+create policy "Profiles: Admin manages profiles" on public.profiles
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
--- Read policies: Both Owner and Admin can read and track
-create policy "Authenticated users can read materials" on public.materials
-  for select using (auth.role() = 'authenticated');
+create policy "Authenticated users read materials" on public.materials
+  for select to authenticated using (auth.uid() is not null);
+create policy "Admin inserts materials" on public.materials
+  for insert to authenticated with check (public.is_admin());
+create policy "Admin updates materials" on public.materials
+  for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "Admin deletes materials" on public.materials
+  for delete to authenticated using (public.is_admin());
 
-create policy "Authenticated users can read ledgers" on public.ledgers
-  for select using (auth.role() = 'authenticated');
+create policy "Authenticated users read ledgers" on public.ledgers
+  for select to authenticated using (auth.uid() is not null);
+create policy "Admin inserts ledgers" on public.ledgers
+  for insert to authenticated with check (public.is_admin());
+create policy "Admin updates ledgers" on public.ledgers
+  for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "Admin deletes ledgers" on public.ledgers
+  for delete to authenticated using (public.is_admin());
 
-create policy "Authenticated users can read parties" on public.parties
-  for select using (auth.role() = 'authenticated');
+create policy "Authenticated users read parties" on public.parties
+  for select to authenticated using (auth.uid() is not null);
+create policy "Admin inserts parties" on public.parties
+  for insert to authenticated with check (public.is_admin());
+create policy "Admin updates parties" on public.parties
+  for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "Admin deletes parties" on public.parties
+  for delete to authenticated using (public.is_admin());
 
-create policy "Authenticated users can read vouchers" on public.vouchers
-  for select using (auth.role() = 'authenticated');
+create policy "Authenticated users read vouchers" on public.vouchers
+  for select to authenticated using (auth.uid() is not null);
+create policy "Admin inserts vouchers" on public.vouchers
+  for insert to authenticated with check (public.is_admin());
+create policy "Admin updates vouchers" on public.vouchers
+  for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "Admin deletes vouchers" on public.vouchers
+  for delete to authenticated using (public.is_admin());
 
--- Write policies: Only Admin can insert, update, or delete
-create policy "Admin can insert materials" on public.materials
-  for insert with check (public.is_admin() or auth.role() = 'authenticated');
+alter table public.vouchers add column if not exists source_system text;
+alter table public.vouchers add column if not exists source_company text;
+alter table public.vouchers add column if not exists source_voucher_guid text;
+alter table public.vouchers add column if not exists source_hash text;
+create unique index if not exists idx_vouchers_source_hash_unique on public.vouchers(source_hash) where source_hash is not null;
+create unique index if not exists idx_vouchers_tally_guid_unique on public.vouchers(source_system, source_company, source_voucher_guid) where source_voucher_guid is not null;
 
-create policy "Admin can update materials" on public.materials
-  for update using (public.is_admin() or auth.role() = 'authenticated');
+create table if not exists public.import_jobs (
+  id uuid primary key default gen_random_uuid(), filename text not null,
+  source_format text not null check (source_format in ('xml','xlsx','xls','csv')),
+  content_sha256 text, status text not null default 'ready' check (status in ('ready','committed','failed','cancelled')),
+  counts jsonb not null default '{}'::jsonb, created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(), committed_at timestamptz, error_summary text
+);
+create table if not exists public.import_rows (
+  id uuid primary key default gen_random_uuid(), job_id uuid not null references public.import_jobs(id) on delete cascade,
+  row_number integer not null, row_type text not null check (row_type in ('voucher','ledger','party','stock_item')),
+  reference text, payload jsonb not null default '{}'::jsonb,
+  validation_status text not null check (validation_status in ('valid','warning','error','duplicate')),
+  validation_messages jsonb not null default '[]'::jsonb, selected_for_import boolean not null default true,
+  created_at timestamptz not null default now(), unique (job_id, row_number)
+);
+create index if not exists idx_import_rows_job_status on public.import_rows(job_id, validation_status);
+create index if not exists idx_import_jobs_created on public.import_jobs(created_at desc);
 
-create policy "Admin can delete materials" on public.materials
-  for delete using (public.is_admin() or auth.role() = 'authenticated');
+create table if not exists public.audit_logs (
+  id uuid primary key default gen_random_uuid(), actor_id uuid references auth.users(id),
+  action text not null, entity_table text not null, entity_id text,
+  metadata jsonb not null default '{}'::jsonb, created_at timestamptz not null default now()
+);
+create index if not exists idx_audit_logs_created on public.audit_logs(created_at desc);
 
-create policy "Admin can insert ledgers" on public.ledgers
-  for insert with check (public.is_admin() or auth.role() = 'authenticated');
+alter table public.import_jobs enable row level security;
+alter table public.import_rows enable row level security;
+alter table public.audit_logs enable row level security;
+drop policy if exists "Admin reads import jobs" on public.import_jobs;
+drop policy if exists "Admin manages import jobs" on public.import_jobs;
+drop policy if exists "Admin manages import rows" on public.import_rows;
+drop policy if exists "Admin reads audit logs" on public.audit_logs;
+create policy "Admin reads import jobs" on public.import_jobs for select to authenticated using (public.is_admin());
+create policy "Admin manages import jobs" on public.import_jobs for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "Admin manages import rows" on public.import_rows for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "Admin reads audit logs" on public.audit_logs for select to authenticated using (public.is_admin());
 
-create policy "Admin can update ledgers" on public.ledgers
-  for update using (public.is_admin() or auth.role() = 'authenticated');
+create or replace function public.commit_tally_import(p_job_id uuid)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp
+as $$
+declare
+  v_job public.import_jobs%rowtype;
+  v_row record;
+  v_payload jsonb;
+  v_type text;
+  v_name text;
+  v_affected integer;
+  v_inserted integer := 0;
+  v_skipped integer := 0;
+  v_party_id uuid;
+begin
+  if not public.is_admin() then raise exception 'Admin role required' using errcode = '42501'; end if;
+  select * into v_job from public.import_jobs where id = p_job_id for update;
+  if not found then raise exception 'Import job not found'; end if;
+  if v_job.status <> 'ready' then raise exception 'Import job is not ready to commit'; end if;
 
-create policy "Admin can insert parties" on public.parties
-  for insert with check (public.is_admin() or auth.role() = 'authenticated');
+  for v_row in select * from public.import_rows where job_id = p_job_id and selected_for_import and validation_status in ('valid','warning') order by row_number loop
+    v_payload := v_row.payload;
+    v_type := coalesce(v_payload->>'type','');
+    v_name := coalesce(v_payload->>'name','');
 
-create policy "Admin can update parties" on public.parties
-  for update using (public.is_admin() or auth.role() = 'authenticated');
+    if v_row.row_type = 'ledger' then
+      insert into public.ledgers(name, "group", opening_balance, current_balance, is_system)
+      values (v_name, coalesce(v_payload->>'group','General'), coalesce(nullif(v_payload->>'opening_balance','')::numeric,0), coalesce(nullif(v_payload->>'opening_balance','')::numeric,0), false)
+      on conflict (name) do nothing;
+      get diagnostics v_affected = row_count;
+      if v_affected > 0 then v_inserted := v_inserted + 1; else v_skipped := v_skipped + 1; end if;
 
-create policy "Admin can delete parties" on public.parties
-  for delete using (public.is_admin() or auth.role() = 'authenticated');
+    elsif v_row.row_type = 'party' then
+      v_type := case when lower(coalesce(v_payload->>'type','debtor')) = 'creditor' then 'creditor' else 'debtor' end;
+      select id into v_party_id from public.parties where lower(name) = lower(v_name) and type = v_type limit 1;
+      if v_party_id is null then
+        insert into public.parties(name,type,uid,phone,email,address,opening_balance,current_balance)
+        values (v_name,v_type,nullif(v_payload->>'uid',''),nullif(v_payload->>'phone',''),nullif(v_payload->>'email',''),nullif(v_payload->>'address',''),coalesce(nullif(v_payload->>'opening_balance','')::numeric,0),coalesce(nullif(v_payload->>'opening_balance','')::numeric,0));
+        v_inserted := v_inserted + 1;
+      else
+        v_skipped := v_skipped + 1;
+      end if;
+      v_party_id := null;
 
-create policy "Admin can insert vouchers" on public.vouchers
-  for insert with check (public.is_admin() or auth.role() = 'authenticated');
+    elsif v_row.row_type = 'stock_item' then
+      insert into public.materials(sku,name,category,unit,purchase_rate,sales_rate,current_qty,reorder_threshold)
+      values (coalesce(nullif(v_payload->>'sku',''),'TALLY-' || left(md5(v_name),12)),v_name,coalesce(v_payload->>'category','General'),coalesce(v_payload->>'unit','pcs'),coalesce(nullif(v_payload->>'purchase_rate','')::numeric,0),coalesce(nullif(v_payload->>'sales_rate','')::numeric,0),coalesce(nullif(v_payload->>'opening_qty','')::numeric,0),10)
+      on conflict (sku) do nothing;
+      get diagnostics v_affected = row_count;
+      if v_affected > 0 then v_inserted := v_inserted + 1; else v_skipped := v_skipped + 1; end if;
 
-create policy "Admin can update vouchers" on public.vouchers
-  for update using (public.is_admin() or auth.role() = 'authenticated');
+    elsif v_row.row_type = 'voucher' then
+      if exists (select 1 from public.vouchers where source_hash = v_payload->>'source_hash'
+        or (nullif(v_payload->>'source_voucher_guid','') is not null and source_system = 'tally'
+          and source_company = coalesce(nullif(v_payload->>'source_company',''),'default') and source_voucher_guid = v_payload->>'source_voucher_guid')) then
+        v_skipped := v_skipped + 1;
+      else
+        insert into public.vouchers(voucher_no,voucher_type,date,party_name,party_uid,amount,paid_amount,due_amount,payment_mode,items,narration,reference_no,source_system,source_company,source_voucher_guid,source_hash,created_by)
+        values (v_payload->>'voucher_no',v_payload->>'voucher_type',(v_payload->>'date')::date,coalesce(nullif(v_payload->>'party_name',''),'Cash'),nullif(v_payload->>'party_uid',''),coalesce(nullif(v_payload->>'amount','')::numeric,0),coalesce(nullif(v_payload->>'paid_amount','')::numeric,0),coalesce(nullif(v_payload->>'due_amount','')::numeric,0),coalesce(nullif(v_payload->>'payment_mode',''),'Tally import'),coalesce(v_payload->'items','[]'::jsonb),nullif(v_payload->>'narration',''),nullif(v_payload->>'reference_no',''),'tally',coalesce(nullif(v_payload->>'source_company',''),'default'),nullif(v_payload->>'source_voucher_guid',''),nullif(v_payload->>'source_hash',''),auth.uid())
+        on conflict (voucher_no) do nothing;
+        get diagnostics v_affected = row_count;
+        if v_affected > 0 then v_inserted := v_inserted + 1; else v_skipped := v_skipped + 1; end if;
+      end if;
+    end if;
+  end loop;
 
-create policy "Admin can delete vouchers" on public.vouchers
-  for delete using (public.is_admin() or auth.role() = 'authenticated');
+  update public.import_jobs set status = 'committed', committed_at = now(),
+    counts = coalesce(counts,'{}'::jsonb) || jsonb_build_object('inserted',v_inserted,'skipped',v_skipped,'problems',coalesce((counts->>'problems')::integer,0))
+    where id = p_job_id;
+  insert into public.audit_logs(actor_id,action,entity_table,entity_id,metadata)
+    values (auth.uid(),'tally_import_committed','import_jobs',p_job_id::text,jsonb_build_object('inserted',v_inserted,'skipped',v_skipped,'filename',v_job.filename));
+  return jsonb_build_object('status','committed','inserted',v_inserted,'skipped',v_skipped,'jobId',p_job_id);
+end;
+$$;
+revoke all on function public.commit_tally_import(uuid) from public, anon;
+grant execute on function public.commit_tally_import(uuid) to authenticated;
 
 -- ==============================================================================
 -- Initial Seed Data (Standard Chart of Accounts & Material Stock)
