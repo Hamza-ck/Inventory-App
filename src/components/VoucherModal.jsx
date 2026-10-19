@@ -30,7 +30,7 @@ const VOUCHER_TYPES = [
   { id: 'journal', label: 'Journal (F7)', color: 'bg-indigo-600 text-white', border: 'border-indigo-600' },
 ]
 
-export default function VoucherModal({ isOpen, onClose, editingVoucher = null, onSuccess }) {
+export default function VoucherModal({ isOpen, onClose, editingVoucher = null, onSuccess, initialVoucherType = 'sales' }) {
   const { isAdmin, isOwner } = useAuth()
 
   // Form State
@@ -97,8 +97,8 @@ export default function VoucherModal({ isOpen, onClose, editingVoucher = null, o
       }
     } else {
       // Reset defaults
-      setVoucherType('sales')
-      setVoucherNo(`INV-${Date.now().toString().slice(-5)}`)
+      setVoucherType(initialVoucherType)
+      setVoucherNo(`${initialVoucherType === 'payment' ? 'PAY' : initialVoucherType === 'purchase' ? 'PUR' : initialVoucherType === 'receipt' ? 'REC' : 'INV'}-${Date.now().toString().slice(-5)}`)
       setDate(new Date().toISOString().slice(0, 10))
       setPartyName('')
       setPartyPhone('')
@@ -112,7 +112,7 @@ export default function VoucherModal({ isOpen, onClose, editingVoucher = null, o
       setItems([{ material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }])
       setError(null)
     }
-  }, [editingVoucher, isOpen])
+  }, [editingVoucher, isOpen, initialVoucherType])
 
   async function loadMasters() {
     const mats = await accDb.materials.toArray()

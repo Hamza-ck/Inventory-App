@@ -118,23 +118,23 @@ export default function DayBookPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16">
+    <div className="min-h-screen bg-[#f4f7f4] text-[#172f2c] font-sans pb-28 lg:pb-0">
       <Nav />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-5">
+      <main className="min-h-screen bg-[#f4f7f4] px-4 pb-28 pt-5 text-[#172f2c] sm:px-6 lg:ml-64 lg:w-[calc(100%-16rem)] lg:px-9 lg:pb-8 lg:pt-8 space-y-5">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
-                <BookOpen className="w-7 h-7 text-blue-500" />
+              <h1 className="text-2xl sm:text-3xl font-black text-[#172f2c] tracking-tight flex items-center gap-2.5">
+                <BookOpen className="w-7 h-7 text-[#0e7a70]" />
                 <span>Tally Day Book</span>
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-slate-800 text-blue-400 border border-slate-700">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-white text-[#0e7a70] border border-[#e1e8e3]">
                 {filteredVouchers.length} Vouchers
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            <p className="text-xs sm:text-sm text-[#71827a] mt-1">
               Chronological financial register developed with Tally methodology (every entry is customizable).
             </p>
           </div>
@@ -143,9 +143,9 @@ export default function DayBookPage() {
             <button
               type="button"
               onClick={exportToExcel}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+              className="px-3.5 py-2 bg-white hover:bg-[#edf5f0] text-[#435b52] border border-[#e1e8e3] rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
             >
-              <Download className="w-4 h-4 text-emerald-400" />
+              <Download className="w-4 h-4 text-[#0e7a70]" />
               <span>Export Day Book (Excel)</span>
             </button>
 
@@ -153,7 +153,7 @@ export default function DayBookPage() {
               <button
                 type="button"
                 onClick={() => { setEditingVoucher(null); setIsVoucherModalOpen(true) }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/30 flex items-center gap-1.5 transition-all"
+                className="px-4 py-2 bg-[#0e7a70] hover:bg-[#086c63] text-white rounded-xl text-xs font-bold shadow-md shadow-[#0e7a70]/15 flex items-center gap-1.5 transition-all"
               >
                 <PlusCircle className="w-4 h-4" />
                 <span>+ New Voucher</span>
@@ -163,17 +163,17 @@ export default function DayBookPage() {
         </div>
 
         {/* Filter Toolbar */}
-        <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md space-y-3">
+        <div className="bg-white p-4 rounded-2xl border border-[#e1e8e3] shadow-md space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {/* Search */}
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#71827a]" />
               <input
                 type="text"
                 placeholder="Search voucher, party, UID, narration..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
               />
             </div>
 
@@ -182,7 +182,7 @@ export default function DayBookPage() {
               <select
                 value={voucherTypeFilter}
                 onChange={(e) => setVoucherTypeFilter(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
               >
                 <option value="all">All Voucher Types (F8, F9, F6, F5, F4, F7)</option>
                 <option value="sales">Sales (F8)</option>
@@ -199,7 +199,7 @@ export default function DayBookPage() {
               <select
                 value={dateRange}
                 onChange={(e) => setDateRange(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
               >
                 <option value="all">All Dates</option>
                 <option value="today">Today</option>
@@ -210,38 +210,47 @@ export default function DayBookPage() {
             </div>
 
             {/* Summary Pill */}
-            <div className="bg-slate-900 px-3.5 py-1.5 rounded-xl border border-slate-700 flex items-center justify-between text-xs font-bold">
-              <span className="text-slate-400">Total Filtered:</span>
-              <span className="text-white">₹{totalAmount.toLocaleString()}</span>
+            <div className="bg-[#f4f7f4] px-3.5 py-1.5 rounded-xl border border-[#e1e8e3] flex items-center justify-between text-xs font-bold">
+              <span className="text-[#71827a]">Total Filtered:</span>
+              <span className="text-[#172f2c]">₹{totalAmount.toLocaleString()}</span>
             </div>
           </div>
 
           {/* Custom Date Pickers */}
           {dateRange === 'custom' && (
-            <div className="flex items-center gap-3 pt-2 border-t border-slate-700/60 text-xs">
-              <span className="text-slate-400 font-semibold">From:</span>
+            <div className="flex items-center gap-3 pt-2 border-t border-[#e1e8e3] text-xs">
+              <span className="text-[#71827a] font-semibold">From:</span>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white"
+                className="px-2.5 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-lg text-[#172f2c]"
               />
-              <span className="text-slate-400 font-semibold">To:</span>
+              <span className="text-[#71827a] font-semibold">To:</span>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white"
+                className="px-2.5 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-lg text-[#172f2c]"
               />
             </div>
           )}
         </div>
 
         {/* Day Book Table */}
-        <div className="bg-slate-800/90 rounded-2xl border border-slate-700/80 shadow-lg overflow-hidden">
+        <section className="grid gap-3 lg:hidden" aria-label="Day Book vouchers">
+          {loading ? <div className="rounded-2xl border border-[#e1e8e3] bg-white p-6 text-center text-xs text-[#71827a]">Loading vouchers…</div> : filteredVouchers.length ? filteredVouchers.map((v) => (
+            <article key={v.id} className="rounded-2xl border border-[#e1e8e3] bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] text-[#82908a]">{v.date || 'Date not recorded'}</p><h2 className="mt-1 truncate text-sm font-extrabold text-[#203a31]">{v.voucher_no || 'Voucher'}</h2><p className="mt-1 truncate text-xs text-[#61756d]">{v.party_name || 'Cash'} · {(v.voucher_type || 'voucher').toUpperCase()}</p></div><strong className="whitespace-nowrap text-sm font-extrabold text-[#203a31]">₹{Number(v.amount || 0).toLocaleString('en-IN')}</strong></div>
+              <div className="mt-3 flex items-center justify-between border-t border-[#edf1ed] pt-3"><span className="text-[10px] text-[#82908a]">Paid ₹{Number(v.paid_amount || 0).toLocaleString('en-IN')} · Due ₹{Number(v.due_amount || 0).toLocaleString('en-IN')}</span><button type="button" onClick={() => { setSelectedInvoice(v); setIsInvoiceModalOpen(true) }} className="rounded-lg border border-[#dce6df] bg-[#f8fbf9] px-3 py-2 text-xs font-bold text-[#36564b]">View</button></div>
+              {isAdmin && <div className="mt-2 flex gap-2"><button type="button" onClick={() => { setEditingVoucher(v); setIsVoucherModalOpen(true) }} className="flex-1 rounded-lg bg-[#0d7c71] px-3 py-2 text-xs font-bold text-white">Edit</button><button type="button" onClick={() => handleDelete(v.id)} className="rounded-lg border border-[#f0d1c7] bg-[#fff7f4] px-3 py-2 text-xs font-bold text-[#a9563b]">Delete</button></div>}
+            </article>
+          )) : <div className="rounded-2xl border border-[#e1e8e3] bg-white p-7 text-center text-xs text-[#82908a]">No vouchers match these filters.</div>}
+        </section>
+        <div className="hidden lg:block bg-white rounded-2xl border border-[#e1e8e3] shadow-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-700">
+              <thead className="bg-[#f8fbf9] text-[#71827a] font-bold uppercase text-[10px] border-b border-[#e1e8e3]">
                 <tr>
                   <th className="py-3 px-3">Date</th>
                   <th className="py-3 px-3">Vch No.</th>
@@ -254,57 +263,57 @@ export default function DayBookPage() {
                   <th className="py-3 px-3 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-700/60 font-medium">
+              <tbody className="divide-y divide-[#e8eee9] font-medium">
                 {filteredVouchers.length > 0 ? (
                   filteredVouchers.map((v) => {
                     const isSales = v.voucher_type === 'sales'
                     return (
-                      <tr key={v.id} className="hover:bg-slate-700/40 transition-colors">
-                        <td className="py-3 px-3 text-slate-300 font-mono whitespace-nowrap">{v.date}</td>
-                        <td className="py-3 px-3 font-mono font-bold text-white whitespace-nowrap">{v.voucher_no}</td>
+                      <tr key={v.id} className="hover:bg-[#f3f8f5] transition-colors">
+                        <td className="py-3 px-3 text-[#52685e] font-mono whitespace-nowrap">{v.date}</td>
+                        <td className="py-3 px-3 font-mono font-bold text-[#172f2c] whitespace-nowrap">{v.voucher_no}</td>
                         <td className="py-3 px-3 whitespace-nowrap">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            v.voucher_type === 'sales' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                            v.voucher_type === 'purchase' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
-                            v.voucher_type === 'receipt' ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30' :
-                            v.voucher_type === 'contra' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                            v.voucher_type === 'payment' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
-                            'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                            v.voucher_type === 'sales' ? 'bg-[#e6f4ee] text-[#0e7a70] border border-[#c6e5d9]' :
+                            v.voucher_type === 'purchase' ? 'bg-[#e6f4ee] text-[#0e7a70] border border-[#c6e5d9]' :
+                            v.voucher_type === 'receipt' ? 'bg-[#e6f4ee] text-[#0e7a70] border border-teal-500/30' :
+                            v.voucher_type === 'contra' ? 'bg-[#fff5e8] text-[#a6651e] border border-[#ead6b7]' :
+                            v.voucher_type === 'payment' ? 'bg-[#fff0eb] text-[#ad5545] border border-[#f0d1c7]' :
+                            'bg-[#e6f4ee] text-[#0e7a70] border border-[#c6e5d9]'
                           }`}>
                             {(v.voucher_type || '').toUpperCase()}
                           </span>
                         </td>
-                        <td className="py-3 px-3 text-white font-semibold">
+                        <td className="py-3 px-3 text-[#172f2c] font-semibold">
                           <div>{v.party_name || 'Cash'}</div>
                           {v.payment_mode && (
-                            <span className="text-[10px] text-slate-400 font-normal">via {v.payment_mode}</span>
+                            <span className="text-[10px] text-[#71827a] font-normal">via {v.payment_mode}</span>
                           )}
                         </td>
                         <td className="py-3 px-3">
                           {v.party_uid ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-mono font-bold border border-blue-500/40">
-                              <ShieldCheck className="w-3 h-3 text-blue-400" />
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#e6f4ee] text-[#0e7669] text-[10px] font-mono font-bold border border-[#b8ddd0]">
+                              <ShieldCheck className="w-3 h-3 text-[#0e7a70]" />
                               <span>{v.party_uid}</span>
                             </span>
                           ) : (
-                            <span className="text-slate-500 text-[11px]">-</span>
+                            <span className="text-[#8a9991] text-[11px]">-</span>
                           )}
                         </td>
-                        <td className="py-3 px-3 text-slate-400 max-w-xs truncate">
+                        <td className="py-3 px-3 text-[#71827a] max-w-xs truncate">
                           {Array.isArray(v.items) && v.items.length > 0 ? (
                             <span>{v.items.map((i) => `${i.name} (${i.qty})`).join(', ')}</span>
                           ) : (
                             <span>{v.narration || '-'}</span>
                           )}
                         </td>
-                        <td className="py-3 px-3 text-right font-black text-white whitespace-nowrap">
+                        <td className="py-3 px-3 text-right font-black text-[#172f2c] whitespace-nowrap">
                           ₹{Number(v.amount || 0).toLocaleString()}
                         </td>
                         <td className="py-3 px-3 text-right font-bold whitespace-nowrap">
                           {Number(v.due_amount || 0) > 0 ? (
-                            <span className="text-rose-400">₹{Number(v.due_amount).toLocaleString()}</span>
+                            <span className="text-[#ad5545]">₹{Number(v.due_amount).toLocaleString()}</span>
                           ) : (
-                            <span className="text-slate-500 font-normal">₹0</span>
+                            <span className="text-[#8a9991] font-normal">₹0</span>
                           )}
                         </td>
                         <td className="py-3 px-3 text-center whitespace-nowrap">
@@ -313,7 +322,7 @@ export default function DayBookPage() {
                               <button
                                 type="button"
                                 onClick={() => { setSelectedInvoice(v); setIsInvoiceModalOpen(true) }}
-                                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
+                                className="p-1.5 rounded-lg bg-[#f4f8f5] hover:bg-[#e8f1eb] text-[#435b52] transition-colors"
                                 title="View & Print Tax Invoice"
                               >
                                 <Eye className="w-3.5 h-3.5" />
@@ -324,7 +333,7 @@ export default function DayBookPage() {
                                 <button
                                   type="button"
                                   onClick={() => { setEditingVoucher(v); setIsVoucherModalOpen(true) }}
-                                  className="p-1.5 rounded-lg bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-[#0e7a70]/30 hover:bg-[#0e7a70] text-[#0e7669] hover:text-white transition-colors"
                                   title="Modify Voucher (Tally edit)"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
@@ -332,14 +341,14 @@ export default function DayBookPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(v.id)}
-                                  className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-[#fff0eb] hover:bg-[#fae1d8] text-[#ad5545] hover:text-white transition-colors"
                                   title="Cancel / Delete Voucher"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </>
                             ) : (
-                              <span className="text-[10px] text-slate-500 italic">Read-only</span>
+                              <span className="text-[10px] text-[#8a9991] italic">Read-only</span>
                             )}
                           </div>
                         </td>
@@ -348,7 +357,7 @@ export default function DayBookPage() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-500">
+                    <td colSpan={9} className="py-8 text-center text-[#8a9991]">
                       No vouchers match your current filters.
                     </td>
                   </tr>

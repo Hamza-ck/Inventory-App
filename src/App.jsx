@@ -12,6 +12,8 @@ const MaterialsPage = lazy(() => import('./pages/MaterialsPage'))
 const PartiesPage = lazy(() => import('./pages/PartiesPage'))
 const BankingPage = lazy(() => import('./pages/BankingPage'))
 const TallyIntegrationPage = lazy(() => import('./pages/TallyIntegrationPage'))
+const ExpensesPage = lazy(() => import('./pages/ExpensesPage'))
+const ControlCenterPage = lazy(() => import('./pages/ControlCenterPage'))
 
 export default function App() {
   return (
@@ -19,10 +21,10 @@ export default function App() {
       <AuthProvider>
         <Suspense
           fallback={
-            <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
+            <div className="min-h-screen bg-[#f4f7f4] flex items-center justify-center text-[#172f2c]">
               <div className="flex items-center gap-3">
-                <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm font-semibold text-slate-300">Loading MEEMX ERP..</span>
+                <div className="w-5 h-5 border-2 border-[#0e7a70] border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm font-semibold text-[#52685e]">Loading MEEMX ERP..</span>
               </div>
             </div>
           }
@@ -85,6 +87,13 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route path="/debtors" element={<ProtectedRoute><PartiesPage /></ProtectedRoute>} />
+            <Route path="/creditors" element={<ProtectedRoute><PartiesPage /></ProtectedRoute>} />
+            <Route path="/expenses" element={<ProtectedRoute><ExpensesPage /></ProtectedRoute>} />
+            <Route path="/imports" element={<ProtectedRoute><TallyIntegrationPage /></ProtectedRoute>} />
+            <Route path="/users" element={<ProtectedRoute><ControlCenterPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><ControlCenterPage /></ProtectedRoute>} />
+            <Route path="/activity" element={<ProtectedRoute><ControlCenterPage /></ProtectedRoute>} />
             <Route
               path="/tally"
               element={

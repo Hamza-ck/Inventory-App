@@ -249,23 +249,23 @@ export default function MaterialsPage() {
   }, [movementMaterial, vouchers])
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16">
+    <div className="min-h-screen bg-[#f4f7f4] text-[#172f2c] font-sans pb-28 lg:pb-0">
       <Nav />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+      <main className="min-h-screen bg-[#f4f7f4] px-4 pb-28 pt-5 text-[#172f2c] sm:px-6 lg:ml-64 lg:w-[calc(100%-16rem)] lg:px-9 lg:pb-8 lg:pt-8 space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
-                <Boxes className="w-7 h-7 text-purple-400" />
+              <h1 className="text-2xl sm:text-3xl font-black text-[#172f2c] tracking-tight flex items-center gap-2.5">
+                <Boxes className="w-7 h-7 text-[#7662a8]" />
                 <span>Materials Stock & Valuation</span>
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#f0ecf8] text-[#7662a8] border border-[#ded4ee]">
                 Pure Material-Wise (No Models)
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            <p className="text-xs sm:text-sm text-[#71827a] mt-1">
               Material-wise stock levels, cost valuation, reorder alerts, and movement tracking.
             </p>
           </div>
@@ -274,9 +274,9 @@ export default function MaterialsPage() {
             <button
               type="button"
               onClick={exportMaterialsExcel}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+              className="px-3.5 py-2 bg-white hover:bg-[#edf5f0] text-[#435b52] border border-[#e1e8e3] rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
             >
-              <Download className="w-4 h-4 text-emerald-400" />
+              <Download className="w-4 h-4 text-[#0e7a70]" />
               <span>Export Stock</span>
             </button>
 
@@ -292,16 +292,16 @@ export default function MaterialsPage() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+                  className="px-3.5 py-2 bg-white hover:bg-[#edf5f0] text-[#435b52] border border-[#e1e8e3] rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
                 >
-                  <Upload className="w-4 h-4 text-blue-400" />
+                  <Upload className="w-4 h-4 text-[#0e7a70]" />
                   <span>Import Excel</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={startAdd}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-600/30 flex items-center gap-1.5 transition-all active:scale-95"
+                  className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-[#0e7a70] hover:to-[#07675e] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-1.5 transition-all active:scale-95"
                 >
                   <Plus className="w-4 h-4" />
                   <span>+ Add Material</span>
@@ -313,43 +313,43 @@ export default function MaterialsPage() {
 
         {/* 3 Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Total Stock Items</span>
-            <div className="text-2xl font-black text-white">{totalStockItems}</div>
-            <div className="text-[11px] text-slate-400 mt-1">Material SKU catalog count</div>
+          <div className="bg-white p-4 rounded-2xl border border-[#e1e8e3] shadow-md">
+            <span className="text-xs font-bold text-[#71827a] uppercase tracking-wider block mb-1">Total Stock Items</span>
+            <div className="text-2xl font-black text-[#172f2c]">{totalStockItems}</div>
+            <div className="text-[11px] text-[#71827a] mt-1">Material SKU catalog count</div>
           </div>
 
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-purple-400 uppercase tracking-wider block mb-1">Total Stock Valuation</span>
-            <div className="text-2xl font-black text-purple-400">₹{totalValuation.toLocaleString()}</div>
-            <div className="text-[11px] text-slate-400 mt-1">Based on purchase cost rate</div>
+          <div className="bg-white p-4 rounded-2xl border border-[#e1e8e3] shadow-md">
+            <span className="text-xs font-bold text-[#7662a8] uppercase tracking-wider block mb-1">Total Stock Valuation</span>
+            <div className="text-2xl font-black text-[#7662a8]">₹{totalValuation.toLocaleString()}</div>
+            <div className="text-[11px] text-[#71827a] mt-1">Based on purchase cost rate</div>
           </div>
 
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider block mb-1">Low Stock Warnings</span>
-            <div className="text-2xl font-black text-amber-400">{lowStockCount} Items</div>
-            <div className="text-[11px] text-slate-400 mt-1">Items at or below reorder threshold</div>
+          <div className="bg-white p-4 rounded-2xl border border-[#e1e8e3] shadow-md">
+            <span className="text-xs font-bold text-[#a6651e] uppercase tracking-wider block mb-1">Low Stock Warnings</span>
+            <div className="text-2xl font-black text-[#a6651e]">{lowStockCount} Items</div>
+            <div className="text-[11px] text-[#71827a] mt-1">Items at or below reorder threshold</div>
           </div>
         </div>
 
         {/* Filter Toolbar */}
-        <div className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
+        <div className="bg-white p-3.5 rounded-2xl border border-[#e1e8e3] flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
             <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#71827a]" />
               <input
                 type="text"
                 placeholder="Search material SKU, name..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full pl-9 pr-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
 
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="px-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-purple-500"
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
@@ -363,24 +363,35 @@ export default function MaterialsPage() {
               onClick={() => setFilterLowStockOnly(!filterLowStockOnly)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
                 filterLowStockOnly
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                  : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                  ? 'bg-[#fff5e8] text-[#9c611c] border-amber-500/40'
+                  : 'bg-[#f4f7f4] text-[#71827a] border-[#e1e8e3] hover:text-white'
               }`}
             >
               Low Stock Only
             </button>
           </div>
 
-          <span className="text-xs text-slate-400 font-semibold">
+          <span className="text-xs text-[#71827a] font-semibold">
             Showing {filtered.length} Materials
           </span>
         </div>
 
         {/* Materials Table */}
-        <div className="bg-slate-800/90 rounded-2xl border border-slate-700/80 shadow-lg overflow-hidden">
+        <section className="grid gap-3 lg:hidden" aria-label="Inventory items">
+          {loading ? <div className="rounded-2xl border border-[#e1e8e3] bg-white p-6 text-center text-xs text-[#71827a]">Loading inventory…</div> : filtered.length ? filtered.map((mat) => {
+            const isLow = Number(mat.current_qty || 0) <= Number(mat.reorder_threshold || 0)
+            const value = (Number(mat.current_qty) || 0) * (Number(mat.purchase_rate) || 0)
+            return <article key={mat.id} className="rounded-2xl border border-[#e1e8e3] bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="text-sm font-extrabold text-[#203a31]">{mat.name}</h2><p className="mt-1 truncate text-[10px] font-semibold text-[#82908a]">{mat.sku} · {mat.category || 'General'}</p></div><span className={'shrink-0 rounded-lg px-2 py-1 text-[9px] font-extrabold ' + (Number(mat.current_qty) <= 0 ? 'bg-[#ffebeb] text-[#bf3b38]' : isLow ? 'bg-[#fff1de] text-[#ad650f]' : 'bg-[#e5f7ee] text-[#0d7864]')}>{Number(mat.current_qty) <= 0 ? 'Out of stock' : isLow ? 'Low stock' : 'Healthy'}</span></div>
+              <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[#edf1ed] pt-3"><div><p className="text-[10px] text-[#82908a]">Available stock</p><strong className="mt-1 block text-sm font-extrabold text-[#203a31]">{mat.current_qty} <span className="text-[10px] font-semibold text-[#82908a]">{mat.unit || 'pcs'}</span></strong></div><div className="text-right"><p className="text-[10px] text-[#82908a]">Stock value</p><strong className="mt-1 block text-sm font-extrabold text-[#203a31]">₹{value.toLocaleString('en-IN')}</strong></div></div>
+              <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => { setMovementMaterial(mat); setIsMovementModalOpen(true) }} className="flex-1 rounded-lg border border-[#dce6df] bg-[#f8fbf9] px-3 py-2 text-xs font-bold text-[#36564b]">Movement</button>{isAdmin && <><button type="button" onClick={() => startEdit(mat)} className="rounded-lg bg-[#0d7c71] px-3 py-2 text-xs font-bold text-white">Edit</button><button type="button" onClick={() => handleDelete(mat.id)} className="rounded-lg border border-[#f0d1c7] bg-[#fff7f4] px-3 py-2 text-xs font-bold text-[#a9563b]">Delete</button></>}</div>
+            </article>
+          }) : <div className="rounded-2xl border border-[#e1e8e3] bg-white p-7 text-center text-xs text-[#82908a]">No stock items match these filters.</div>}
+        </section>
+        <div className="hidden lg:block bg-white rounded-2xl border border-[#e1e8e3] shadow-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-700">
+              <thead className="bg-[#f8fbf9] text-[#71827a] font-bold uppercase text-[10px] border-b border-[#e1e8e3]">
                 <tr>
                   <th className="py-3 px-3">Item Code / SKU</th>
                   <th className="py-3 px-3">Material Name</th>
@@ -393,35 +404,35 @@ export default function MaterialsPage() {
                   <th className="py-3 px-3 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-700/60 font-medium">
+              <tbody className="divide-y divide-[#e8eee9] font-medium">
                 {filtered.length > 0 ? (
                   filtered.map((mat) => {
                     const isLow = Number(mat.current_qty) <= Number(mat.reorder_threshold)
                     const valuation = Number(mat.current_qty || 0) * Number(mat.purchase_rate || 0)
                     return (
-                      <tr key={mat.id} className="hover:bg-slate-700/40 transition-colors">
-                        <td className="py-3 px-3 font-mono font-bold text-white whitespace-nowrap">{mat.sku}</td>
-                        <td className="py-3 px-3 font-bold text-white">
+                      <tr key={mat.id} className="hover:bg-[#f3f8f5] transition-colors">
+                        <td className="py-3 px-3 font-mono font-bold text-[#172f2c] whitespace-nowrap">{mat.sku}</td>
+                        <td className="py-3 px-3 font-bold text-[#172f2c]">
                           <div>{mat.name}</div>
                         </td>
-                        <td className="py-3 px-3 text-slate-400">{mat.category || 'General'}</td>
-                        <td className="py-3 px-3 text-right text-slate-300 font-mono">₹{Number(mat.purchase_rate || 0).toLocaleString()}</td>
-                        <td className="py-3 px-3 text-right text-emerald-400 font-mono font-bold">₹{Number(mat.sales_rate || 0).toLocaleString()}</td>
-                        <td className="py-3 px-3 text-right font-black text-white whitespace-nowrap">
-                          {mat.current_qty} <span className="text-[10px] text-slate-400 font-normal">{mat.unit || 'pcs'}</span>
+                        <td className="py-3 px-3 text-[#71827a]">{mat.category || 'General'}</td>
+                        <td className="py-3 px-3 text-right text-[#52685e] font-mono">₹{Number(mat.purchase_rate || 0).toLocaleString()}</td>
+                        <td className="py-3 px-3 text-right text-[#0e7a70] font-mono font-bold">₹{Number(mat.sales_rate || 0).toLocaleString()}</td>
+                        <td className="py-3 px-3 text-right font-black text-[#172f2c] whitespace-nowrap">
+                          {mat.current_qty} <span className="text-[10px] text-[#71827a] font-normal">{mat.unit || 'pcs'}</span>
                         </td>
-                        <td className="py-3 px-3 text-right font-black text-purple-300 whitespace-nowrap">
+                        <td className="py-3 px-3 text-right font-black text-[#7662a8] whitespace-nowrap">
                           ₹{valuation.toLocaleString()}
                         </td>
                         <td className="py-3 px-3 text-center whitespace-nowrap">
                           {isLow ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30">
-                              <AlertTriangle className="w-3 h-3 text-amber-400" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fff5e8] text-[#9c611c] text-[10px] font-bold border border-[#ead6b7]">
+                              <AlertTriangle className="w-3 h-3 text-[#a6651e]" />
                               <span>Reorder</span>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#e6f4ee] text-[#0e7a70] text-[10px] font-bold border border-[#c6e5d9]">
+                              <CheckCircle2 className="w-3 h-3 text-[#0e7a70]" />
                               <span>Optimal</span>
                             </span>
                           )}
@@ -431,17 +442,17 @@ export default function MaterialsPage() {
                             <button
                               type="button"
                               onClick={() => { setMovementMaterial(mat); setIsMovementModalOpen(true) }}
-                              className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                              className="p-1.5 rounded-lg bg-[#f4f8f5] hover:bg-[#e8f1eb] text-[#52685e] hover:text-[#172f2c] transition-colors"
                               title="Stock Inward/Outward Movements"
                             >
-                              <History className="w-3.5 h-3.5 text-blue-400" />
+                              <History className="w-3.5 h-3.5 text-[#0e7a70]" />
                             </button>
                             {isAdmin && (
                               <>
                                 <button
                                   type="button"
                                   onClick={() => startEdit(mat)}
-                                  className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-[#f4f8f5] hover:bg-[#e8f1eb] text-[#52685e] hover:text-[#172f2c] transition-colors"
                                   title="Edit Material"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
@@ -449,7 +460,7 @@ export default function MaterialsPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(mat.id)}
-                                  className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-[#fff0eb] hover:bg-[#fae1d8] text-[#ad5545] hover:text-white transition-colors"
                                   title="Delete Material"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -463,7 +474,7 @@ export default function MaterialsPage() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-500">
+                    <td colSpan={9} className="py-8 text-center text-[#8a9991]">
                       No materials found matching filter.
                     </td>
                   </tr>
@@ -480,19 +491,19 @@ export default function MaterialsPage() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-lg bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-2xl text-white font-sans"
+            className="w-full max-w-lg bg-[#f4f7f4] rounded-2xl p-6 border border-[#e1e8e3] shadow-2xl text-[#172f2c] font-sans"
           >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h2 className="text-base font-bold text-white">
+            <div className="flex items-center justify-between pb-3 border-b border-[#e1e8e3]">
+              <h2 className="text-base font-bold text-[#172f2c]">
                 {editingId ? 'Modify Material' : 'Add New Material Stock Item'}
               </h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setIsModalOpen(false)} className="text-[#71827a] hover:text-[#172f2c]">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {error && (
-              <div className="mt-3 p-3 bg-rose-500/20 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-semibold">
+              <div className="mt-3 p-3 bg-[#fff0eb] border border-[#f0d1c7] text-[#a94a3f] rounded-xl text-xs font-semibold">
                 {error}
               </div>
             )}
@@ -500,112 +511,112 @@ export default function MaterialsPage() {
             <form onSubmit={handleSave} className="space-y-3.5 pt-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">SKU / Item Code *</label>
+                  <label className="block text-xs font-bold text-[#52685e] mb-1">SKU / Item Code *</label>
                   <input
                     type="text"
                     required
                     value={form.sku}
                     onChange={(e) => setForm({ ...form, sku: e.target.value })}
                     placeholder="e.g. MAT-CANVAS-01"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs font-mono text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Category / Group</label>
+                  <label className="block text-xs font-bold text-[#52685e] mb-1">Category / Group</label>
                   <input
                     type="text"
                     value={form.category}
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
                     placeholder="e.g. Textiles"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none"
+                    className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] focus:outline-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Material Name *</label>
+                <label className="block text-xs font-bold text-[#52685e] mb-1">Material Name *</label>
                 <input
                   type="text"
                   required
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="e.g. Industrial Cotton Canvas 350 GSM"
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Unit of Measure</label>
+                  <label className="block text-xs font-bold text-[#52685e] mb-1">Unit of Measure</label>
                   <input
                     type="text"
                     value={form.unit}
                     onChange={(e) => setForm({ ...form, unit: e.target.value })}
                     placeholder="meter, kg, pcs, box"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+                    className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Cost Rate (₹)</label>
+                  <label className="block text-xs font-bold text-[#52685e] mb-1">Cost Rate (₹)</label>
                   <input
                     type="number"
                     step="any"
                     value={form.purchase_rate}
                     onChange={(e) => setForm({ ...form, purchase_rate: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                    className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] text-right"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Sales Rate (₹)</label>
+                  <label className="block text-xs font-bold text-[#52685e] mb-1">Sales Rate (₹)</label>
                   <input
                     type="number"
                     step="any"
                     value={form.sales_rate}
                     onChange={(e) => setForm({ ...form, sales_rate: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                    className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] text-right"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Current Stock Quantity</label>
+                  <label className="block text-xs font-bold text-[#52685e] mb-1">Current Stock Quantity</label>
                   <input
                     type="number"
                     step="any"
                     value={form.current_qty}
                     onChange={(e) => setForm({ ...form, current_qty: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                    className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] text-right"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Reorder Threshold</label>
+                  <label className="block text-xs font-bold text-[#52685e] mb-1">Reorder Threshold</label>
                   <input
                     type="number"
                     step="any"
                     value={form.reorder_threshold}
                     onChange={(e) => setForm({ ...form, reorder_threshold: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                    className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] text-right"
                   />
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-[#e1e8e3] flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                  className="px-4 py-2 rounded-xl text-xs text-[#71827a] hover:text-[#172f2c]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-600/30"
+                  className="px-5 py-2 rounded-xl bg-[#0e7a70] hover:bg-[#086c63] text-[#172f2c] text-xs font-bold shadow-md shadow-[#0e7a70]/15"
                 >
                   {saving ? 'Saving...' : 'Save Material'}
                 </button>
@@ -617,27 +628,27 @@ export default function MaterialsPage() {
 
       {/* Material Inward/Outward Movements Modal */}
       {isMovementModalOpen && movementMaterial && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#102b25]/80 backdrop-blur-xs">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-2xl bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-2xl text-white font-sans max-h-[85vh] flex flex-col"
+            className="w-full max-w-2xl bg-[#f4f7f4] rounded-2xl p-6 border border-[#e1e8e3] shadow-2xl text-[#172f2c] font-sans max-h-[85vh] flex flex-col"
           >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+            <div className="flex items-center justify-between pb-3 border-b border-[#e1e8e3] shrink-0">
               <div>
-                <span className="text-[10px] font-mono text-purple-400 font-bold uppercase">Stock Register</span>
-                <h2 className="text-base font-bold text-white mt-0.5">
+                <span className="text-[10px] font-mono text-[#7662a8] font-bold uppercase">Stock Register</span>
+                <h2 className="text-base font-bold text-[#172f2c] mt-0.5">
                   {movementMaterial.name} ({movementMaterial.sku})
                 </h2>
               </div>
-              <button onClick={() => setIsMovementModalOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setIsMovementModalOpen(false)} className="text-[#71827a] hover:text-[#172f2c]">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="py-4 overflow-y-auto flex-1">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-800 text-slate-400 uppercase text-[10px] font-bold">
+                <thead className="bg-white text-[#71827a] uppercase text-[10px] font-bold">
                   <tr>
                     <th className="py-2.5 px-3">Date</th>
                     <th className="py-2.5 px-3">Vch No.</th>
@@ -646,20 +657,20 @@ export default function MaterialsPage() {
                     <th className="py-2.5 px-3 text-right">Inward / Outward Qty</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800 font-medium">
+                <tbody className="divide-y divide-[#e8eee9] font-medium">
                   {materialMovements.length > 0 ? (
                     materialMovements.map((m, i) => (
-                      <tr key={i} className="hover:bg-slate-800/40">
-                        <td className="py-2.5 px-3 text-slate-300 font-mono">{m.date}</td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-white">{m.voucher_no}</td>
+                      <tr key={i} className="hover:bg-[#f3f8f5]">
+                        <td className="py-2.5 px-3 text-[#52685e] font-mono">{m.date}</td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-[#172f2c]">{m.voucher_no}</td>
                         <td className="py-2.5 px-3 uppercase text-[10px] font-bold">
-                          <span className={m.voucher_type === 'purchase' ? 'text-teal-400' : 'text-emerald-400'}>
+                          <span className={m.voucher_type === 'purchase' ? 'text-[#0e7a70]' : 'text-[#0e7a70]'}>
                             {m.voucher_type === 'purchase' ? 'IN (Purchase)' : 'OUT (Sales)'}
                           </span>
                         </td>
-                        <td className="py-2.5 px-3 text-slate-300">{m.party_name}</td>
+                        <td className="py-2.5 px-3 text-[#52685e]">{m.party_name}</td>
                         <td className={`py-2.5 px-3 text-right font-bold ${
-                          m.voucher_type === 'purchase' ? 'text-teal-400' : 'text-rose-400'
+                          m.voucher_type === 'purchase' ? 'text-[#0e7a70]' : 'text-[#ad5545]'
                         }`}>
                           {m.voucher_type === 'purchase' ? `+${m.qty}` : `-${m.qty}`} {movementMaterial.unit || 'pcs'}
                         </td>
@@ -667,7 +678,7 @@ export default function MaterialsPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={5} className="py-6 text-center text-slate-500">
+                      <td colSpan={5} className="py-6 text-center text-[#8a9991]">
                         No inward/outward voucher movements logged yet for this material.
                       </td>
                     </tr>
@@ -676,9 +687,9 @@ export default function MaterialsPage() {
               </table>
             </div>
 
-            <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs shrink-0">
-              <span className="text-slate-400">Current Stock in Hand:</span>
-              <span className="text-base font-black text-white">
+            <div className="pt-3 border-t border-[#e1e8e3] flex justify-between items-center text-xs shrink-0">
+              <span className="text-[#71827a]">Current Stock in Hand:</span>
+              <span className="text-base font-black text-[#172f2c]">
                 {movementMaterial.current_qty} {movementMaterial.unit || 'pcs'}
               </span>
             </div>
