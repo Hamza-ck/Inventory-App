@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { 
   Users, 
@@ -26,9 +27,10 @@ import VoucherModal from '../components/VoucherModal'
 
 export default function PartiesPage() {
   const { isAdmin, isOwner } = useAuth()
+  const location = useLocation()
   const [parties, setParties] = useState([])
   const [vouchers, setVouchers] = useState([])
-  const [activeTab, setActiveTab] = useState('debtor') // 'debtor' | 'creditor'
+  const [activeTab, setActiveTab] = useState(location.pathname === '/creditors' ? 'creditor' : 'debtor') // 'debtor' | 'creditor'
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -56,6 +58,10 @@ export default function PartiesPage() {
   // Statement Drilldown Modal
   const [statementParty, setStatementParty] = useState(null)
   const [isStatementOpen, setIsStatementOpen] = useState(false)
+
+  useEffect(() => {
+    setActiveTab(location.pathname === '/creditors' ? 'creditor' : 'debtor')
+  }, [location.pathname])
 
   useEffect(() => {
     load()
