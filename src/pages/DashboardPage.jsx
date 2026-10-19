@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, ArrowRight, ArrowUpRight, Boxes, CircleAlert, Clock3, Download, FileSpreadsheet, Landmark, RefreshCw, ReceiptText, Users } from 'lucide-react'
+import { Activity, ArrowRight, ArrowUpRight, Boxes, CircleAlert, Clock3, Download, FileSpreadsheet, Landmark, RefreshCw, ReceiptText, Users, Settings2 } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis } from 'recharts'
 import { accDb } from '../lib/accountingDb'
 import { supabase } from '../lib/supabaseClient'
@@ -174,6 +174,7 @@ export default function DashboardPage() {
             </div>
             <button type="button" onClick={refresh} disabled={refreshing} className="inline-flex items-center gap-2 rounded-xl border border-[#dfe8e2] bg-white px-3 py-2.5 text-xs font-bold text-[#496258]"><RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh</button>
             <button type="button" onClick={() => downloadCsv(scoped, period)} className="hidden items-center gap-2 rounded-xl border border-[#dfe8e2] bg-white px-3 py-2.5 text-xs font-bold text-[#496258] sm:inline-flex"><Download size={14} /> Download report</button>
+            {isAdmin && <Link to="/settings" className="inline-flex items-center gap-2 rounded-xl border border-[#dfe8e2] bg-white px-3 py-2.5 text-xs font-bold text-[#496258] no-underline"><Settings2 size={14} /> Owner view settings</Link>}
           </div>
         </div>
 
