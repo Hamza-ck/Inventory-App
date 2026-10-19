@@ -13,6 +13,7 @@ const overviewItems = [
   { to: '/debtors', label: 'Debtors', icon: Users },
   { to: '/creditors', label: 'Creditors', icon: Building2 },
   { to: '/sales', label: 'Sales', icon: ReceiptText },
+  { to: '/daybook', label: 'Day Book', icon: BookOpen },
   { to: '/materials', label: 'Inventory', icon: Boxes },
   { to: '/expenses', label: 'Expenses', icon: WalletCards },
   { to: '/banking', label: 'Loans & Advances', icon: Banknote },
@@ -110,7 +111,7 @@ export default function Nav() {
     </nav>
 
     {moreOpen && <div className="fixed bottom-[82px] right-5 z-50 flex w-[205px] flex-col rounded-2xl border border-[#e1e9e4] bg-white p-2 shadow-xl lg:hidden">
-      {[...overviewItems.filter((item) => ['/creditors', '/expenses', '/banking'].includes(item.to)), ...(isAdmin ? controlItems : [])].map((item) => {
+      {[...overviewItems.filter((item) => ['/creditors', '/expenses', '/banking', '/daybook'].includes(item.to)), ...(isAdmin ? controlItems : [])].map((item) => {
         const Icon = item.icon
         return <NavLink key={item.to} to={item.to} className={mobileLinkClass} onClick={() => setMoreOpen(false)}><Icon size={18} /><span>{item.label}</span></NavLink>
       })}
