@@ -111,7 +111,7 @@ export default function SalesPage() {
             <button
               type="button"
               onClick={() => { setEditingVoucher(null); setIsVoucherModalOpen(true) }}
-              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all active:scale-95"
+              className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-2 transition-all active:scale-95"
             >
               <PlusCircle className="w-4 h-4" />
               <span>+ New Sales Invoice</span>
@@ -122,7 +122,7 @@ export default function SalesPage() {
         {/* UID Logic Informational Banner */}
         <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/60 to-indigo-950/60 border border-[#c6e5d9] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600/30 text-[#0e7a70] flex items-center justify-center shrink-0 border border-[#c6e5d9]">
+            <div className="w-9 h-9 rounded-xl bg-[#0e7a70]/30 text-[#0e7a70] flex items-center justify-center shrink-0 border border-[#c6e5d9]">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
@@ -168,14 +168,14 @@ export default function SalesPage() {
                 placeholder="Search invoice #, customer name, permanent UID..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
               />
             </div>
 
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
             >
               <option value="all">All Settlements</option>
               <option value="paid">Fully Settled (Cash)</option>
@@ -185,7 +185,7 @@ export default function SalesPage() {
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
-              className="px-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
             >
               <option value="all">All Dates</option>
               <option value="today">Today</option>
@@ -266,7 +266,7 @@ export default function SalesPage() {
                             <button
                               type="button"
                               onClick={() => { setSelectedInvoice(v); setIsInvoiceModalOpen(true) }}
-                              className="p-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-[#0e7669] hover:text-white transition-colors"
+                              className="p-1.5 rounded-lg bg-[#0e7a70]/20 hover:bg-[#0e7a70] text-[#0e7669] hover:text-white transition-colors"
                               title="Print / View Tax Invoice"
                             >
                               <Printer className="w-3.5 h-3.5" />
