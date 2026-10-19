@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import {
   Activity, Banknote, BookOpen, Boxes, Building2, ChevronDown, CircleUserRound,
   FileSpreadsheet, LayoutDashboard, LogOut, Menu, PlusCircle, ReceiptText,
@@ -27,15 +27,14 @@ const controlItems = [
 ]
 
 export default function Nav() {
-  const { isAdmin, isOwner, signOut, user } = useAuth()
+  const { isAdmin, signOut, user } = useAuth()
   const [voucherOpen, setVoucherOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const location = useLocation()
   const mobileItems = overviewItems.filter((item) => ['/', '/debtors', '/sales', '/materials'].includes(item.to))
   const linkClass = ({ isActive }) =>
     'group flex min-h-[42px] items-center gap-3 rounded-xl px-3 text-[13px] font-semibold no-underline transition-colors ' +
-    (isActive || (location.pathname === '/parties' && ['/debtors', '/creditors'].includes(location.pathname))
+    isActive
       ? 'bg-[#e0f2e9] text-[#087367]'
       : 'text-[#c8ded7] hover:bg-white/10 hover:text-white')
   const mobileLinkClass = ({ isActive }) =>
@@ -48,7 +47,7 @@ export default function Nav() {
   }
 
   return <>
-    <aside className="fixed inset-y-0 left-0 z-50 hidden w-64 flex-col bg-[#102b25] px-4 py-5 text-white lg:flex">
+    <aside className="fixed inset-y-0 left-0 z-50 hidden w-64 flex-col overflow-y-auto bg-[#102b25] px-4 py-5 text-white lg:flex">
       <NavLink to="/" className="mb-8 flex items-center gap-3 px-2 text-white no-underline">
         <span className="grid h-10 w-10 place-items-center rounded-[13px] bg-[#ddf3e9] text-[#08766a]"><Building2 size={20} /></span>
         <span><strong className="block text-[16px] tracking-tight">Books Console</strong><small className="mt-0.5 block text-[11px] text-[#a9c9bf]">Accounting workspace</small></span>
