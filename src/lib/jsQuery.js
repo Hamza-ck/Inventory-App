@@ -1,8 +1,6 @@
-/**
- * JSquery: Advanced Client-Side Querying & Accounting Engine
- * Provides fluent query chaining, fast indexing, date slicing,
- * financial calculations (Profits, Cash Flow, Debtor aging, Tax, COGS).
- */
+import { todayISO } from './format.js'
+
+/** Small chainable filter helper + dashboard financial metrics. */
 
 class JSQueryChain {
   constructor(data = []) {
@@ -51,39 +49,10 @@ class JSQueryChain {
     return this
   }
 
-  sortBy(field, direction = 'asc') {
-    const mult = direction.toLowerCase() === 'desc' ? -1 : 1
-    this.data.sort((a, b) => {
-      const va = a[field]
-      const vb = b[field]
-      if (va === vb) return 0
-      if (va === null || va === undefined) return 1
-      if (vb === null || vb === undefined) return -1
-      return va > vb ? mult : -mult
-    })
-    return this
-  }
 
-  sumBy(field) {
-    return this.data.reduce((acc, item) => acc + (Number(item[field]) || 0), 0)
-  }
 
-  count() {
-    return this.data.length
-  }
 
-  groupBy(field) {
-    return this.data.reduce((acc, item) => {
-      const key = item[field] ?? 'Other'
-      if (!acc[key]) acc[key] = []
-      acc[key].push(item)
-      return acc
-    }, {})
-  }
 
-  first() {
-    return this.data[0] || null
-  }
 
   execute() {
     return this.data
@@ -98,54 +67,59 @@ export function jsQuery(data) {
  * High-Level Financial Calculations (Profits, Cash & Bank, Loans, Debtors, Creditors)
  */
 
+/**
+ * Gross profit of one sales voucher = sum((rate - cost) * qty).
+ * Vouchers with no item detail (e.g. imported day-book rows) have an UNKNOWN
+ * margin: we return null instead of inventing one.
+ */
+export function voucherGrossProfit(v) {
+  if (!Array.isArray(v.items) || v.items.length === 0) return null
+  return v.items.reduce(
+    (sum, it) => sum + ((Number(it.rate) || 0) - (Number(it.cost_rate) || 0)) * (Number(it.qty) || 0),
+    0
+  )
+}
+
 export function calculateFinancialMetrics({ vouchers = [], ledgers = [], materials = [], parties = [] }) {
   const allVouchers = vouchers || []
-  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayStr = todayISO()
+  const isToday = (v) => (v.date || '').slice(0, 10) === todayStr
+  const sum = (list, f) => list.reduce((acc, v) => acc + (Number(f(v)) || 0), 0)
 
-  // 1. Daily Sales & Total Sales
+  // 1. Sales
   const salesVouchers = allVouchers.filter((v) => v.voucher_type === 'sales')
-  const todaySalesVouchers = salesVouchers.filter((v) => (v.date || '').slice(0, 10) === todayStr)
+  const todaySales = salesVouchers.filter(isToday)
 
-  const todaySalesTotal = todaySalesVouchers.reduce((acc, v) => acc + (Number(v.amount) || 0), 0)
-  const todaySalesPaid = todaySalesVouchers.reduce((acc, v) => acc + (Number(v.paid_amount) || 0), 0)
-  const todaySalesDue = todaySalesVouchers.reduce((acc, v) => acc + (Number(v.due_amount) || 0), 0)
-
-  const totalSalesRevenue = salesVouchers.reduce((acc, v) => acc + (Number(v.amount) || 0), 0)
-
-  // 2. Gross & Net Profits
-  // Gross Profit = Sum of (Sales item revenue - Sales item cost price)
+  // 2. Profit (only vouchers with item cost data)
   let totalGrossProfit = 0
   let todayGrossProfit = 0
-
+  let unpricedSales = 0
   salesVouchers.forEach((v) => {
-    const isToday = (v.date || '').slice(0, 10) === todayStr
-    let voucherGross = 0
-    if (Array.isArray(v.items) && v.items.length > 0) {
-      v.items.forEach((item) => {
-        const qty = Number(item.qty) || 0
-        const rate = Number(item.rate) || 0
-        const costRate = Number(item.cost_rate) || 0
-        voucherGross += (rate - costRate) * qty
-      })
-    } else {
-      // Estimated 20% margin if item cost rate is not specified
-      voucherGross = (Number(v.amount) || 0) * 0.2
+    const g = voucherGrossProfit(v)
+    if (g === null) {
+      unpricedSales++
+      return
     }
-    totalGrossProfit += voucherGross
-    if (isToday) todayGrossProfit += voucherGross
+    totalGrossProfit += g
+    if (isToday(v)) todayGrossProfit += g
   })
 
-  // Operating Expenses from Payment vouchers with expense ledgers
-  const expenseVouchers = allVouchers.filter((v) => {
-    return v.voucher_type === 'payment' && (v.expense_category || v.debit_ledger_name?.toLowerCase().includes('expense') || v.debit_ledger_name?.toLowerCase().includes('rent') || v.debit_ledger_name?.toLowerCase().includes('salary'))
-  })
-  const totalExpenses = expenseVouchers.reduce((acc, v) => acc + (Number(v.amount) || 0), 0)
-  const todayExpenses = expenseVouchers
-    .filter((v) => (v.date || '').slice(0, 10) === todayStr)
-    .reduce((acc, v) => acc + (Number(v.amount) || 0), 0)
-
+  // Expenses = payments booked against an expense ledger
+  const expenseLedgerIds = new Set(ledgers.filter((l) => /expense/i.test(l.group || '')).map((l) => String(l.id)))
+  const expenseVouchers = allVouchers.filter(
+    (v) =>
+      v.voucher_type === 'payment' &&
+      ((v.counter_ledger_id && expenseLedgerIds.has(String(v.counter_ledger_id))) || v.expense_category)
+  )
+  const totalExpenses = sum(expenseVouchers, (v) => v.amount)
+  const todayExpenses = sum(expenseVouchers.filter(isToday), (v) => v.amount)
   const totalNetProfit = totalGrossProfit - totalExpenses
   const todayNetProfit = todayGrossProfit - todayExpenses
+  const totalSalesRevenue = sum(salesVouchers, (v) => v.amount)
+  const todaySalesTotal = sum(todaySales, (v) => v.amount)
+  const todaySalesPaid = sum(todaySales, (v) => v.paid_amount)
+  const todaySalesDue = sum(todaySales, (v) => v.due_amount)
+  const todaySalesVouchers = todaySales
 
   // 3. Cash & Bank Balances
   // Starting ledger balances + Inflows - Outflows
@@ -199,6 +173,7 @@ export function calculateFinancialMetrics({ vouchers = [], ledgers = [], materia
       grossProfit: totalGrossProfit,
       expenses: totalExpenses,
       netProfit: totalNetProfit,
+      unpricedSales,
     },
     cashAndBank: {
       cash: totalCashBalance,

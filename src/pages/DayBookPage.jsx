@@ -1,32 +1,30 @@
-import { useEffect, useState, useMemo } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useMemo } from 'react'
 import * as XLSX from 'xlsx'
 import { 
   BookOpen, 
   Search, 
-  Calendar, 
-  Filter, 
   PlusCircle, 
   Edit3, 
   Trash2, 
   Eye, 
   Download, 
-  ShieldCheck, 
-  Layers,
-  ArrowRightLeft,
-  X
-} from 'lucide-react'
-import { accDb, deleteVoucher } from '../lib/accountingDb'
+  ShieldCheck } from 'lucide-react'
+import { deleteVoucher } from '../lib/accountingDb'
+import { useTable } from '../lib/useTable'
+import { useUI } from '../context/UIContext'
+import { useVoucherEditor } from '../context/VoucherEditorContext'
+import { todayISO, daysAgoISO } from '../lib/format'
 import { jsQuery } from '../lib/jsQuery'
 import { useAuth } from '../context/AuthContext'
-import Nav from '../components/Nav'
-import VoucherModal from '../components/VoucherModal'
-import InvoicePrintModal from '../components/InvoicePrintModal'
+
+const byDateDesc = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || 0) - (a.id || 0)
 
 export default function DayBookPage() {
-  const { isAdmin, isOwner } = useAuth()
-  const [vouchers, setVouchers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { isAdmin } = useAuth()
+  const ui = useUI()
+  const { openVoucher, viewInvoice } = useVoucherEditor()
+  const allVouchers = useTable('vouchers')
+  const vouchers = useMemo(() => [...(allVouchers ?? [])].sort(byDateDesc), [allVouchers])
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('')
@@ -34,28 +32,6 @@ export default function DayBookPage() {
   const [dateRange, setDateRange] = useState('all') // 'today', 'yesterday', 'month', 'all', 'custom'
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
-
-  // Modals
-  const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false)
-  const [editingVoucher, setEditingVoucher] = useState(null)
-  const [selectedInvoice, setSelectedInvoice] = useState(null)
-  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false)
-
-  useEffect(() => {
-    load()
-    function handleUpdate() { load() }
-    window.addEventListener('accounting-data-updated', handleUpdate)
-    return () => window.removeEventListener('accounting-data-updated', handleUpdate)
-  }, [])
-
-  async function load() {
-    setLoading(true)
-    const list = await accDb.vouchers.toArray()
-    // Sort descending by date
-    list.sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt))
-    setVouchers(list)
-    setLoading(false)
-  }
 
   // Filtered list using JSquery
   const filteredVouchers = useMemo(() => {
@@ -69,11 +45,11 @@ export default function DayBookPage() {
       q = q.search(searchTerm, ['voucher_no', 'party_name', 'party_uid', 'narration', 'payment_mode'])
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10)
+    const todayStr = todayISO()
     if (dateRange === 'today') {
       q = q.where((v) => (v.date || '').slice(0, 10) === todayStr)
     } else if (dateRange === 'yesterday') {
-      const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+      const y = daysAgoISO(1)
       q = q.where((v) => (v.date || '').slice(0, 10) === y)
     } else if (dateRange === 'month') {
       const curMonth = todayStr.slice(0, 7)
@@ -87,14 +63,19 @@ export default function DayBookPage() {
 
   // Totals of filtered list
   const totalAmount = filteredVouchers.reduce((sum, v) => sum + (Number(v.amount) || 0), 0)
-  const totalDue = filteredVouchers.reduce((sum, v) => sum + (Number(v.due_amount) || 0), 0)
 
   async function handleDelete(id) {
     if (!isAdmin) return
-    if (!confirm('Are you sure you want to delete this voucher? All inventory movements and party balances will be cleanly reversed.')) return
-
-    await deleteVoucher(id)
-    load()
+    const ok = await ui.confirm('Delete this voucher? Stock, party balances and cash/bank are reversed automatically.', {
+      confirmLabel: 'Delete',
+      danger: true })
+    if (!ok) return
+    try {
+      await deleteVoucher(id)
+      ui.toast('Voucher deleted')
+    } catch (err) {
+      ui.toast(err.message || 'Could not delete voucher', 'error')
+    }
   }
 
   function exportToExcel() {
@@ -108,33 +89,34 @@ export default function DayBookPage() {
       'Paid Amount': Number(v.paid_amount || 0),
       'Due Balance': Number(v.due_amount || 0),
       'Payment Mode': v.payment_mode || '',
-      Narration: v.narration || '',
-    }))
+      Narration: v.narration || '' }))
 
     const ws = XLSX.utils.json_to_sheet(exportRows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Tally_DayBook')
-    XLSX.writeFile(wb, `Tally_DayBook_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    XLSX.writeFile(wb, `Tally_DayBook_${todayISO()}.xlsx`)
+  }
+
+  if (!allVouchers) {
+    return <div className="min-h-[60vh] bg-slate-50 flex items-center justify-center"><div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /></div>
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16">
-      <Nav />
-
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-16">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-5">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
-                <BookOpen className="w-7 h-7 text-blue-500" />
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
+                <BookOpen className="w-7 h-7 text-blue-600" />
                 <span>Tally Day Book</span>
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-slate-800 text-blue-400 border border-slate-700">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-slate-100 text-blue-700 border border-slate-200">
                 {filteredVouchers.length} Vouchers
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            <p className="text-xs sm:text-sm text-slate-600 mt-1">
               Chronological financial register developed with Tally methodology (every entry is customizable).
             </p>
           </div>
@@ -143,17 +125,17 @@ export default function DayBookPage() {
             <button
               type="button"
               onClick={exportToExcel}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+              className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
             >
-              <Download className="w-4 h-4 text-emerald-400" />
+              <Download className="w-4 h-4 text-emerald-600" />
               <span>Export Day Book (Excel)</span>
             </button>
 
             {isAdmin && (
               <button
                 type="button"
-                onClick={() => { setEditingVoucher(null); setIsVoucherModalOpen(true) }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/30 flex items-center gap-1.5 transition-all"
+                onClick={() => openVoucher()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all"
               >
                 <PlusCircle className="w-4 h-4" />
                 <span>+ New Voucher</span>
@@ -163,7 +145,7 @@ export default function DayBookPage() {
         </div>
 
         {/* Filter Toolbar */}
-        <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md space-y-3">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {/* Search */}
             <div className="relative">
@@ -173,7 +155,7 @@ export default function DayBookPage() {
                 placeholder="Search voucher, party, UID, narration..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
 
@@ -182,7 +164,7 @@ export default function DayBookPage() {
               <select
                 value={voucherTypeFilter}
                 onChange={(e) => setVoucherTypeFilter(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
                 <option value="all">All Voucher Types (F8, F9, F6, F5, F4, F7)</option>
                 <option value="sales">Sales (F8)</option>
@@ -199,7 +181,7 @@ export default function DayBookPage() {
               <select
                 value={dateRange}
                 onChange={(e) => setDateRange(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
                 <option value="all">All Dates</option>
                 <option value="today">Today</option>
@@ -210,38 +192,38 @@ export default function DayBookPage() {
             </div>
 
             {/* Summary Pill */}
-            <div className="bg-slate-900 px-3.5 py-1.5 rounded-xl border border-slate-700 flex items-center justify-between text-xs font-bold">
-              <span className="text-slate-400">Total Filtered:</span>
-              <span className="text-white">₹{totalAmount.toLocaleString()}</span>
+            <div className="bg-slate-50 px-3.5 py-1.5 rounded-xl border border-slate-200 flex items-center justify-between text-xs font-bold">
+              <span className="text-slate-600">Total Filtered:</span>
+              <span className="text-slate-900 font-black">₹{totalAmount.toLocaleString()}</span>
             </div>
           </div>
 
           {/* Custom Date Pickers */}
           {dateRange === 'custom' && (
-            <div className="flex items-center gap-3 pt-2 border-t border-slate-700/60 text-xs">
-              <span className="text-slate-400 font-semibold">From:</span>
+            <div className="flex items-center gap-3 pt-2 border-t border-slate-200 text-xs">
+              <span className="text-slate-600 font-bold">From:</span>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white"
+                className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-semibold"
               />
-              <span className="text-slate-400 font-semibold">To:</span>
+              <span className="text-slate-600 font-bold">To:</span>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white"
+                className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-semibold"
               />
             </div>
           )}
         </div>
 
         {/* Day Book Table */}
-        <div className="bg-slate-800/90 rounded-2xl border border-slate-700/80 shadow-lg overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-700">
+              <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-200">
                 <tr>
                   <th className="py-3 px-3">Date</th>
                   <th className="py-3 px-3">Vch No.</th>
@@ -254,57 +236,57 @@ export default function DayBookPage() {
                   <th className="py-3 px-3 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-700/60 font-medium">
+              <tbody className="divide-y divide-slate-100 font-medium">
                 {filteredVouchers.length > 0 ? (
                   filteredVouchers.map((v) => {
                     const isSales = v.voucher_type === 'sales'
                     return (
-                      <tr key={v.id} className="hover:bg-slate-700/40 transition-colors">
-                        <td className="py-3 px-3 text-slate-300 font-mono whitespace-nowrap">{v.date}</td>
-                        <td className="py-3 px-3 font-mono font-bold text-white whitespace-nowrap">{v.voucher_no}</td>
+                      <tr key={v.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-3 text-slate-600 font-mono whitespace-nowrap">{v.date}</td>
+                        <td className="py-3 px-3 font-mono font-black text-slate-900 whitespace-nowrap">{v.voucher_no}</td>
                         <td className="py-3 px-3 whitespace-nowrap">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            v.voucher_type === 'sales' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                            v.voucher_type === 'purchase' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
-                            v.voucher_type === 'receipt' ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30' :
-                            v.voucher_type === 'contra' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                            v.voucher_type === 'payment' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
-                            'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                            v.voucher_type === 'sales' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                            v.voucher_type === 'purchase' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                            v.voucher_type === 'receipt' ? 'bg-teal-50 text-teal-700 border border-teal-200' :
+                            v.voucher_type === 'contra' ? 'bg-amber-50 text-amber-800 border border-amber-200' :
+                            v.voucher_type === 'payment' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                            'bg-indigo-50 text-indigo-700 border border-indigo-200'
                           }`}>
                             {(v.voucher_type || '').toUpperCase()}
                           </span>
                         </td>
-                        <td className="py-3 px-3 text-white font-semibold">
+                        <td className="py-3 px-3 text-slate-900 font-bold">
                           <div>{v.party_name || 'Cash'}</div>
                           {v.payment_mode && (
-                            <span className="text-[10px] text-slate-400 font-normal">via {v.payment_mode}</span>
+                            <span className="text-[10px] text-slate-500 font-medium">via {v.payment_mode}</span>
                           )}
                         </td>
                         <td className="py-3 px-3">
                           {v.party_uid ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-mono font-bold border border-blue-500/40">
-                              <ShieldCheck className="w-3 h-3 text-blue-400" />
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-mono font-bold border border-blue-200">
+                              <ShieldCheck className="w-3 h-3 text-blue-600" />
                               <span>{v.party_uid}</span>
                             </span>
                           ) : (
-                            <span className="text-slate-500 text-[11px]">-</span>
+                            <span className="text-slate-400 text-[11px]">-</span>
                           )}
                         </td>
-                        <td className="py-3 px-3 text-slate-400 max-w-xs truncate">
+                        <td className="py-3 px-3 text-slate-600 max-w-xs truncate font-medium">
                           {Array.isArray(v.items) && v.items.length > 0 ? (
                             <span>{v.items.map((i) => `${i.name} (${i.qty})`).join(', ')}</span>
                           ) : (
                             <span>{v.narration || '-'}</span>
                           )}
                         </td>
-                        <td className="py-3 px-3 text-right font-black text-white whitespace-nowrap">
+                        <td className="py-3 px-3 text-right font-black text-slate-900 whitespace-nowrap">
                           ₹{Number(v.amount || 0).toLocaleString()}
                         </td>
                         <td className="py-3 px-3 text-right font-bold whitespace-nowrap">
                           {Number(v.due_amount || 0) > 0 ? (
-                            <span className="text-rose-400">₹{Number(v.due_amount).toLocaleString()}</span>
+                            <span className="text-rose-600 font-black">₹{Number(v.due_amount).toLocaleString()}</span>
                           ) : (
-                            <span className="text-slate-500 font-normal">₹0</span>
+                            <span className="text-slate-400 font-medium">₹0</span>
                           )}
                         </td>
                         <td className="py-3 px-3 text-center whitespace-nowrap">
@@ -312,8 +294,8 @@ export default function DayBookPage() {
                             {isSales && (
                               <button
                                 type="button"
-                                onClick={() => { setSelectedInvoice(v); setIsInvoiceModalOpen(true) }}
-                                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
+                                onClick={() => viewInvoice(v)}
+                                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
                                 title="View & Print Tax Invoice"
                               >
                                 <Eye className="w-3.5 h-3.5" />
@@ -323,8 +305,8 @@ export default function DayBookPage() {
                               <>
                                 <button
                                   type="button"
-                                  onClick={() => { setEditingVoucher(v); setIsVoucherModalOpen(true) }}
-                                  className="p-1.5 rounded-lg bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white transition-colors"
+                                  onClick={() => openVoucher(v)}
+                                  className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors"
                                   title="Modify Voucher (Tally edit)"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
@@ -332,14 +314,14 @@ export default function DayBookPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(v.id)}
-                                  className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 transition-colors"
                                   title="Cancel / Delete Voucher"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </>
                             ) : (
-                              <span className="text-[10px] text-slate-500 italic">Read-only</span>
+                              <span className="text-[10px] text-slate-400 italic">Read-only</span>
                             )}
                           </div>
                         </td>
@@ -348,7 +330,7 @@ export default function DayBookPage() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-500">
+                    <td colSpan={9} className="py-8 text-center text-slate-500 font-medium">
                       No vouchers match your current filters.
                     </td>
                   </tr>
@@ -358,20 +340,6 @@ export default function DayBookPage() {
           </div>
         </div>
       </main>
-
-      {/* Modals */}
-      <VoucherModal
-        isOpen={isVoucherModalOpen}
-        onClose={() => setIsVoucherModalOpen(false)}
-        editingVoucher={editingVoucher}
-        onSuccess={load}
-      />
-
-      <InvoicePrintModal
-        isOpen={isInvoiceModalOpen}
-        onClose={() => setIsInvoiceModalOpen(false)}
-        invoice={selectedInvoice}
-      />
     </div>
   )
 }

@@ -1,7 +1,9 @@
 import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { UIProvider } from './context/UIContext'
 import ProtectedRoute from './components/ProtectedRoute'
+import Layout from './components/Layout'
 import Login from './pages/Login'
 
 // Route-level code splitting
@@ -13,89 +15,41 @@ const PartiesPage = lazy(() => import('./pages/PartiesPage'))
 const BankingPage = lazy(() => import('./pages/BankingPage'))
 const TallyIntegrationPage = lazy(() => import('./pages/TallyIntegrationPage'))
 
+function PageLoader() {
+  return (
+    <div className="min-h-[60vh] bg-slate-50 flex items-center justify-center text-slate-900">
+      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Suspense
-          fallback={
-            <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm font-semibold text-slate-300">Loading MEEMX ERP..</span>
-              </div>
-            </div>
-          }
-        >
+        <UIProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route
-              path="/"
               element={
                 <ProtectedRoute>
-                  <DashboardPage />
+                  <Layout />
                 </ProtectedRoute>
               }
-            />
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute>
-                  <DashboardPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/daybook"
-              element={
-                <ProtectedRoute>
-                  <DayBookPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/sales"
-              element={
-                <ProtectedRoute>
-                  <SalesPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/materials"
-              element={
-                <ProtectedRoute>
-                  <MaterialsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/parties"
-              element={
-                <ProtectedRoute>
-                  <PartiesPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/banking"
-              element={
-                <ProtectedRoute>
-                  <BankingPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/tally"
-              element={
-                <ProtectedRoute>
-                  <TallyIntegrationPage />
-                </ProtectedRoute>
-              }
-            />
+            >
+              {['/', '/dashboard'].map((path) => (
+                <Route key={path} path={path} element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
+              ))}
+              <Route path="/daybook" element={<Suspense fallback={<PageLoader />}><DayBookPage /></Suspense>} />
+              <Route path="/sales" element={<Suspense fallback={<PageLoader />}><SalesPage /></Suspense>} />
+              <Route path="/materials" element={<Suspense fallback={<PageLoader />}><MaterialsPage /></Suspense>} />
+              <Route path="/parties" element={<Suspense fallback={<PageLoader />}><PartiesPage /></Suspense>} />
+              <Route path="/banking" element={<Suspense fallback={<PageLoader />}><BankingPage /></Suspense>} />
+              <Route path="/tally" element={<Suspense fallback={<PageLoader />}><TallyIntegrationPage /></Suspense>} />
+            </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </Suspense>
+        </UIProvider>
       </AuthProvider>
     </BrowserRouter>
   )

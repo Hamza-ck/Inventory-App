@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useMemo, useRef } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import * as XLSX from 'xlsx'
 import { 
   Boxes, 
@@ -10,19 +10,14 @@ import {
   AlertTriangle, 
   CheckCircle2, 
   X, 
-  Package, 
-  FileSpreadsheet, 
   Download, 
   Upload, 
-  DollarSign,
-  TrendingUp,
-  History,
-  Layers,
-  Check
-} from 'lucide-react'
-import { accDb } from '../lib/accountingDb'
+  History } from 'lucide-react'
+import { accDb, isSkuTaken } from '../lib/accountingDb'
+import { useTable, EMPTY } from '../lib/useTable'
+import { useUI } from '../context/UIContext'
+import { todayISO } from '../lib/format'
 import { useAuth } from '../context/AuthContext'
-import Nav from '../components/Nav'
 
 const emptyForm = {
   sku: '',
@@ -32,14 +27,13 @@ const emptyForm = {
   purchase_rate: 100,
   sales_rate: 140,
   current_qty: 0,
-  reorder_threshold: 10,
-}
+  reorder_threshold: 10 }
 
 export default function MaterialsPage() {
   const { isAdmin, isOwner } = useAuth()
-  const [materials, setMaterials] = useState([])
-  const [vouchers, setVouchers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const ui = useUI()
+  const materialsRaw = useTable('materials')
+  const materials = useMemo(() => materialsRaw ?? [], [materialsRaw])
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -54,22 +48,6 @@ export default function MaterialsPage() {
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false)
 
   const fileInputRef = useRef(null)
-
-  useEffect(() => {
-    load()
-    function handleUpdate() { load() }
-    window.addEventListener('accounting-data-updated', handleUpdate)
-    return () => window.removeEventListener('accounting-data-updated', handleUpdate)
-  }, [])
-
-  async function load() {
-    setLoading(true)
-    const list = await accDb.materials.toArray()
-    const vchs = await accDb.vouchers.toArray()
-    setMaterials(list)
-    setVouchers(vchs)
-    setLoading(false)
-  }
 
   // Categories list
   const categories = useMemo(() => {
@@ -97,8 +75,7 @@ export default function MaterialsPage() {
     setEditingId(null)
     setForm({
       ...emptyForm,
-      sku: `MAT-${Date.now().toString().slice(-4)}`,
-    })
+      sku: `MAT-${Date.now().toString().slice(-4)}` })
     setError(null)
     setIsModalOpen(true)
   }
@@ -113,8 +90,7 @@ export default function MaterialsPage() {
       purchase_rate: material.purchase_rate || 0,
       sales_rate: material.sales_rate || 0,
       current_qty: material.current_qty || 0,
-      reorder_threshold: material.reorder_threshold || 10,
-    })
+      reorder_threshold: material.reorder_threshold || 10 })
     setError(null)
     setIsModalOpen(true)
   }
@@ -131,14 +107,18 @@ export default function MaterialsPage() {
     setError(null)
 
     try {
+      if (await isSkuTaken(form.sku, editingId)) {
+        setError(`SKU "${form.sku.trim()}" is already used by another material`)
+        setSaving(false)
+        return
+      }
       if (editingId) {
         await accDb.materials.update(editingId, {
           ...form,
           purchase_rate: Number(form.purchase_rate) || 0,
           sales_rate: Number(form.sales_rate) || 0,
           current_qty: Number(form.current_qty) || 0,
-          reorder_threshold: Number(form.reorder_threshold) || 0,
-        })
+          reorder_threshold: Number(form.reorder_threshold) || 0 })
       } else {
         await accDb.materials.add({
           ...form,
@@ -146,24 +126,29 @@ export default function MaterialsPage() {
           sales_rate: Number(form.sales_rate) || 0,
           current_qty: Number(form.current_qty) || 0,
           reorder_threshold: Number(form.reorder_threshold) || 0,
-          created_at: new Date().toISOString(),
-        })
+          created_at: new Date().toISOString() })
       }
 
       setSaving(false)
       setIsModalOpen(false)
-      load()
     } catch (err) {
       setError(err.message || 'Failed to save material')
       setSaving(false)
     }
   }
 
-  async function handleDelete(id) {
+  async function handleDelete(m) {
     if (!isAdmin) return
-    if (!confirm('Are you sure you want to delete this material?')) return
-    await accDb.materials.delete(id)
-    load()
+    const used = await accDb.vouchers
+      .filter((v) => (v.items || []).some((it) => Number(it.material_id) === m.id || it.sku === m.sku))
+      .count()
+    if (used > 0) {
+      ui.toast(`"${m.name}" is used in ${used} voucher(s) and can't be deleted. Set its stock to zero instead.`, 'error')
+      return
+    }
+    if (!(await ui.confirm(`Delete "${m.name}"?`, { confirmLabel: 'Delete', danger: true }))) return
+    await accDb.materials.delete(m.id)
+    ui.toast('Material deleted')
   }
 
   // Export to Excel
@@ -177,13 +162,12 @@ export default function MaterialsPage() {
       'Sales Rate (₹)': Number(m.sales_rate || 0),
       'Current Stock': Number(m.current_qty || 0),
       'Reorder Level': Number(m.reorder_threshold || 0),
-      'Stock Valuation (₹)': Number(m.current_qty || 0) * Number(m.purchase_rate || 0),
-    }))
+      'Stock Valuation (₹)': Number(m.current_qty || 0) * Number(m.purchase_rate || 0) }))
 
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Materials_Inventory')
-    XLSX.writeFile(wb, `Materials_Stock_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    XLSX.writeFile(wb, `Materials_Stock_${todayISO()}.xlsx`)
   }
 
   // Import from Excel
@@ -198,31 +182,41 @@ export default function MaterialsPage() {
       const ws = wb.Sheets[wb.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
 
-      let added = 0
+      const toAdd = []
+      let skipped = 0
+      const seen = new Set()
+      const num = (v, d = 0) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : d)
       for (const r of rows) {
-        const name = r['Material Name'] || r['Item Name'] || r['Name']
-        const sku = r['SKU / Item Code'] || r['SKU'] || r['Item Code'] || `MAT-${Date.now().toString().slice(-4)}`
-        if (name) {
-          await accDb.materials.add({
-            sku: String(sku).trim(),
-            name: String(name).trim(),
-            category: r['Category'] || 'General',
-            unit: r['Unit'] || 'pcs',
-            purchase_rate: parseFloat(r['Cost Rate (₹)'] || r['Purchase Rate'] || 100) || 100,
-            sales_rate: parseFloat(r['Sales Rate (₹)'] || r['Sales Rate'] || 140) || 140,
-            current_qty: parseFloat(r['Current Stock'] || r['Qty'] || 0) || 0,
-            reorder_threshold: parseFloat(r['Reorder Level'] || 10) || 10,
-          })
-          added++
+        const name = String(r['Material Name'] || r['Item Name'] || r['Name'] || '').trim()
+        if (!name) continue
+        const sku = String(r['SKU / Item Code'] || r['SKU'] || r['Item Code'] || '').trim()
+        if (!sku || seen.has(sku.toLowerCase()) || (await isSkuTaken(sku))) {
+          skipped++ // missing or duplicate SKU: never create a second copy
+          continue
         }
+        seen.add(sku.toLowerCase())
+        toAdd.push({
+          sku,
+          name,
+          category: r['Category'] || 'General',
+          unit: r['Unit'] || 'pcs',
+          purchase_rate: num(r['Cost Rate (₹)'] ?? r['Purchase Rate']),
+          sales_rate: num(r['Sales Rate (₹)'] ?? r['Sales Rate']),
+          current_qty: num(r['Current Stock'] ?? r['Qty']),
+          reorder_threshold: num(r['Reorder Level'], 10),
+          created_at: new Date().toISOString() })
       }
-
-      alert(`Successfully imported ${added} materials!`)
-      load()
+      await accDb.materials.bulkAdd(toAdd)
+      ui.toast(`Imported ${toAdd.length} material(s)${skipped ? `, skipped ${skipped} with a missing or duplicate SKU` : ''}`)
     } catch (err) {
-      alert('Failed to import Excel: ' + err.message)
+      ui.toast('Failed to import Excel: ' + err.message, 'error')
+    } finally {
+      e.target.value = ''
     }
   }
+
+  // Vouchers are only read while the movement history modal is open
+  const vouchers = useLiveQuery(() => (movementMaterial ? accDb.vouchers.toArray() : []), [movementMaterial?.id]) ?? EMPTY
 
   // Material Movement History from vouchers
   const materialMovements = useMemo(() => {
@@ -239,8 +233,7 @@ export default function MaterialsPage() {
               party_name: v.party_name,
               qty: it.qty,
               rate: it.rate,
-              amount: it.amount || it.qty * it.rate,
-            })
+              amount: it.amount || it.qty * it.rate })
           }
         })
       }
@@ -249,23 +242,21 @@ export default function MaterialsPage() {
   }, [movementMaterial, vouchers])
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16">
-      <Nav />
-
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-16">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
-                <Boxes className="w-7 h-7 text-purple-400" />
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
+                <Boxes className="w-7 h-7 text-purple-600" />
                 <span>Materials Stock & Valuation</span>
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200">
                 Pure Material-Wise (No Models)
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            <p className="text-xs sm:text-sm text-slate-600 mt-1">
               Material-wise stock levels, cost valuation, reorder alerts, and movement tracking.
             </p>
           </div>
@@ -274,9 +265,9 @@ export default function MaterialsPage() {
             <button
               type="button"
               onClick={exportMaterialsExcel}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+              className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
             >
-              <Download className="w-4 h-4 text-emerald-400" />
+              <Download className="w-4 h-4 text-emerald-600" />
               <span>Export Stock</span>
             </button>
 
@@ -292,16 +283,16 @@ export default function MaterialsPage() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+                  className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
                 >
-                  <Upload className="w-4 h-4 text-blue-400" />
+                  <Upload className="w-4 h-4 text-blue-600" />
                   <span>Import Excel</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={startAdd}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-600/30 flex items-center gap-1.5 transition-all active:scale-95"
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all active:scale-95"
                 >
                   <Plus className="w-4 h-4" />
                   <span>+ Add Material</span>
@@ -313,27 +304,27 @@ export default function MaterialsPage() {
 
         {/* 3 Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Total Stock Items</span>
-            <div className="text-2xl font-black text-white">{totalStockItems}</div>
-            <div className="text-[11px] text-slate-400 mt-1">Material SKU catalog count</div>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">Total Stock Items</span>
+            <div className="text-2xl font-black text-slate-900">{totalStockItems}</div>
+            <div className="text-[11px] text-slate-500 mt-1 font-medium">Material SKU catalog count</div>
           </div>
 
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-purple-400 uppercase tracking-wider block mb-1">Total Stock Valuation</span>
-            <div className="text-2xl font-black text-purple-400">₹{totalValuation.toLocaleString()}</div>
-            <div className="text-[11px] text-slate-400 mt-1">Based on purchase cost rate</div>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <span className="text-xs font-bold text-purple-700 uppercase tracking-wider block mb-1">Total Stock Valuation</span>
+            <div className="text-2xl font-black text-purple-700">₹{totalValuation.toLocaleString()}</div>
+            <div className="text-[11px] text-slate-500 mt-1 font-medium">Based on purchase cost rate</div>
           </div>
 
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider block mb-1">Low Stock Warnings</span>
-            <div className="text-2xl font-black text-amber-400">{lowStockCount} Items</div>
-            <div className="text-[11px] text-slate-400 mt-1">Items at or below reorder threshold</div>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <span className="text-xs font-bold text-amber-700 uppercase tracking-wider block mb-1">Low Stock Warnings</span>
+            <div className="text-2xl font-black text-amber-700">{lowStockCount} Items</div>
+            <div className="text-[11px] text-slate-500 mt-1 font-medium">Items at or below reorder threshold</div>
           </div>
         </div>
 
         {/* Filter Toolbar */}
-        <div className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
+        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -342,14 +333,14 @@ export default function MaterialsPage() {
                 placeholder="Search material SKU, name..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-600"
               />
             </div>
 
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600"
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
@@ -363,24 +354,24 @@ export default function MaterialsPage() {
               onClick={() => setFilterLowStockOnly(!filterLowStockOnly)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
                 filterLowStockOnly
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                  : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                  ? 'bg-amber-100 text-amber-900 border-amber-300'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
               }`}
             >
               Low Stock Only
             </button>
           </div>
 
-          <span className="text-xs text-slate-400 font-semibold">
+          <span className="text-xs text-slate-600 font-bold">
             Showing {filtered.length} Materials
           </span>
         </div>
 
         {/* Materials Table */}
-        <div className="bg-slate-800/90 rounded-2xl border border-slate-700/80 shadow-lg overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-700">
+              <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-200">
                 <tr>
                   <th className="py-3 px-3">Item Code / SKU</th>
                   <th className="py-3 px-3">Material Name</th>
@@ -393,35 +384,35 @@ export default function MaterialsPage() {
                   <th className="py-3 px-3 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-700/60 font-medium">
+              <tbody className="divide-y divide-slate-100 font-medium">
                 {filtered.length > 0 ? (
                   filtered.map((mat) => {
                     const isLow = Number(mat.current_qty) <= Number(mat.reorder_threshold)
                     const valuation = Number(mat.current_qty || 0) * Number(mat.purchase_rate || 0)
                     return (
-                      <tr key={mat.id} className="hover:bg-slate-700/40 transition-colors">
-                        <td className="py-3 px-3 font-mono font-bold text-white whitespace-nowrap">{mat.sku}</td>
-                        <td className="py-3 px-3 font-bold text-white">
+                      <tr key={mat.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-3 font-mono font-black text-slate-900 whitespace-nowrap">{mat.sku}</td>
+                        <td className="py-3 px-3 font-bold text-slate-900">
                           <div>{mat.name}</div>
                         </td>
-                        <td className="py-3 px-3 text-slate-400">{mat.category || 'General'}</td>
-                        <td className="py-3 px-3 text-right text-slate-300 font-mono">₹{Number(mat.purchase_rate || 0).toLocaleString()}</td>
-                        <td className="py-3 px-3 text-right text-emerald-400 font-mono font-bold">₹{Number(mat.sales_rate || 0).toLocaleString()}</td>
-                        <td className="py-3 px-3 text-right font-black text-white whitespace-nowrap">
-                          {mat.current_qty} <span className="text-[10px] text-slate-400 font-normal">{mat.unit || 'pcs'}</span>
+                        <td className="py-3 px-3 text-slate-600">{mat.category || 'General'}</td>
+                        <td className="py-3 px-3 text-right text-slate-700 font-mono font-bold">₹{Number(mat.purchase_rate || 0).toLocaleString()}</td>
+                        <td className="py-3 px-3 text-right text-emerald-700 font-mono font-black">₹{Number(mat.sales_rate || 0).toLocaleString()}</td>
+                        <td className="py-3 px-3 text-right font-black text-slate-900 whitespace-nowrap">
+                          {mat.current_qty} <span className="text-[10px] text-slate-500 font-medium">{mat.unit || 'pcs'}</span>
                         </td>
-                        <td className="py-3 px-3 text-right font-black text-purple-300 whitespace-nowrap">
+                        <td className="py-3 px-3 text-right font-black text-purple-700 whitespace-nowrap">
                           ₹{valuation.toLocaleString()}
                         </td>
                         <td className="py-3 px-3 text-center whitespace-nowrap">
                           {isLow ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30">
-                              <AlertTriangle className="w-3 h-3 text-amber-400" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[10px] font-bold border border-amber-200">
+                              <AlertTriangle className="w-3 h-3 text-amber-600" />
                               <span>Reorder</span>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                               <span>Optimal</span>
                             </span>
                           )}
@@ -431,25 +422,25 @@ export default function MaterialsPage() {
                             <button
                               type="button"
                               onClick={() => { setMovementMaterial(mat); setIsMovementModalOpen(true) }}
-                              className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                              className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors"
                               title="Stock Inward/Outward Movements"
                             >
-                              <History className="w-3.5 h-3.5 text-blue-400" />
+                              <History className="w-3.5 h-3.5 text-blue-600" />
                             </button>
                             {isAdmin && (
                               <>
                                 <button
                                   type="button"
                                   onClick={() => startEdit(mat)}
-                                  className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
                                   title="Edit Material"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleDelete(mat.id)}
-                                  className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white transition-colors"
+                                  onClick={() => handleDelete(mat)}
+                                  className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 transition-colors"
                                   title="Delete Material"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -463,7 +454,7 @@ export default function MaterialsPage() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-500">
+                    <td colSpan={9} className="py-8 text-center text-slate-500 font-medium">
                       No materials found matching filter.
                     </td>
                   </tr>
@@ -476,23 +467,21 @@ export default function MaterialsPage() {
 
       {/* Add / Edit Material Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-lg bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-2xl text-white font-sans"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
+          <div
+            className="w-full max-w-lg bg-white rounded-2xl p-6 border border-slate-200 shadow-xl text-slate-900 font-sans"
           >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h2 className="text-base font-bold text-white">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h2 className="text-base font-bold text-slate-900">
                 {editingId ? 'Modify Material' : 'Add New Material Stock Item'}
               </h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {error && (
-              <div className="mt-3 p-3 bg-rose-500/20 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-semibold">
+              <div className="mt-3 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold">
                 {error}
               </div>
             )}
@@ -500,144 +489,144 @@ export default function MaterialsPage() {
             <form onSubmit={handleSave} className="space-y-3.5 pt-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">SKU / Item Code *</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">SKU / Item Code *</label>
                   <input
                     type="text"
                     required
                     value={form.sku}
                     onChange={(e) => setForm({ ...form, sku: e.target.value })}
                     placeholder="e.g. MAT-CANVAS-01"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Category / Group</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Category / Group</label>
                   <input
                     type="text"
                     value={form.category}
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
                     placeholder="e.g. Textiles"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Material Name *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Material Name *</label>
                 <input
                   type="text"
                   required
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="e.g. Industrial Cotton Canvas 350 GSM"
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600"
                 />
               </div>
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Unit of Measure</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Unit of Measure</label>
                   <input
                     type="text"
                     value={form.unit}
                     onChange={(e) => setForm({ ...form, unit: e.target.value })}
                     placeholder="meter, kg, pcs, box"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Cost Rate (₹)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Cost Rate (₹)</label>
                   <input
                     type="number"
                     step="any"
                     value={form.purchase_rate}
                     onChange={(e) => setForm({ ...form, purchase_rate: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 text-right"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Sales Rate (₹)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Sales Rate (₹)</label>
                   <input
                     type="number"
                     step="any"
                     value={form.sales_rate}
                     onChange={(e) => setForm({ ...form, sales_rate: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 text-right"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Current Stock Quantity</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">{editingId ? 'Current Stock' : 'Opening Stock'}</label>
                   <input
                     type="number"
                     step="any"
                     value={form.current_qty}
                     onChange={(e) => setForm({ ...form, current_qty: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                    readOnly={Boolean(editingId)}
+                    className={`w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 text-right ${editingId ? 'opacity-60 cursor-not-allowed bg-slate-50' : ''}`}
                   />
+                  {editingId && <p className="mt-1 text-[10px] text-slate-500 font-medium">Stock changes through purchase and sales vouchers.</p>}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Reorder Threshold</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Reorder Threshold</label>
                   <input
                     type="number"
                     step="any"
                     value={form.reorder_threshold}
                     onChange={(e) => setForm({ ...form, reorder_threshold: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white text-right"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 text-right"
                   />
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-900"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-600/30"
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs"
                 >
                   {saving ? 'Saving...' : 'Save Material'}
                 </button>
               </div>
             </form>
-          </motion.div>
+          </div>
         </div>
       )}
 
       {/* Material Inward/Outward Movements Modal */}
       {isMovementModalOpen && movementMaterial && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-2xl bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-2xl text-white font-sans max-h-[85vh] flex flex-col"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
+          <div
+            className="w-full max-w-2xl bg-white rounded-2xl p-6 border border-slate-200 shadow-xl text-slate-900 font-sans max-h-[85vh] flex flex-col"
           >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
               <div>
-                <span className="text-[10px] font-mono text-purple-400 font-bold uppercase">Stock Register</span>
-                <h2 className="text-base font-bold text-white mt-0.5">
+                <span className="text-[10px] font-mono text-purple-700 font-bold uppercase">Stock Register</span>
+                <h2 className="text-base font-bold text-slate-900 mt-0.5">
                   {movementMaterial.name} ({movementMaterial.sku})
                 </h2>
               </div>
-              <button onClick={() => setIsMovementModalOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setIsMovementModalOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="py-4 overflow-y-auto flex-1">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-800 text-slate-400 uppercase text-[10px] font-bold">
+                <thead className="bg-slate-100 text-slate-700 uppercase text-[10px] font-bold border-b border-slate-200">
                   <tr>
                     <th className="py-2.5 px-3">Date</th>
                     <th className="py-2.5 px-3">Vch No.</th>
@@ -646,20 +635,20 @@ export default function MaterialsPage() {
                     <th className="py-2.5 px-3 text-right">Inward / Outward Qty</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800 font-medium">
+                <tbody className="divide-y divide-slate-100 font-medium">
                   {materialMovements.length > 0 ? (
                     materialMovements.map((m, i) => (
-                      <tr key={i} className="hover:bg-slate-800/40">
-                        <td className="py-2.5 px-3 text-slate-300 font-mono">{m.date}</td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-white">{m.voucher_no}</td>
+                      <tr key={i} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-2.5 px-3 text-slate-600 font-mono">{m.date}</td>
+                        <td className="py-2.5 px-3 font-mono font-black text-slate-900">{m.voucher_no}</td>
                         <td className="py-2.5 px-3 uppercase text-[10px] font-bold">
-                          <span className={m.voucher_type === 'purchase' ? 'text-teal-400' : 'text-emerald-400'}>
+                          <span className={m.voucher_type === 'purchase' ? 'text-teal-700' : 'text-emerald-700'}>
                             {m.voucher_type === 'purchase' ? 'IN (Purchase)' : 'OUT (Sales)'}
                           </span>
                         </td>
-                        <td className="py-2.5 px-3 text-slate-300">{m.party_name}</td>
-                        <td className={`py-2.5 px-3 text-right font-bold ${
-                          m.voucher_type === 'purchase' ? 'text-teal-400' : 'text-rose-400'
+                        <td className="py-2.5 px-3 text-slate-900 font-semibold">{m.party_name}</td>
+                        <td className={`py-2.5 px-3 text-right font-black ${
+                          m.voucher_type === 'purchase' ? 'text-teal-700' : 'text-rose-700'
                         }`}>
                           {m.voucher_type === 'purchase' ? `+${m.qty}` : `-${m.qty}`} {movementMaterial.unit || 'pcs'}
                         </td>
@@ -667,7 +656,7 @@ export default function MaterialsPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={5} className="py-6 text-center text-slate-500">
+                      <td colSpan={5} className="py-6 text-center text-slate-500 font-medium">
                         No inward/outward voucher movements logged yet for this material.
                       </td>
                     </tr>
@@ -676,13 +665,13 @@ export default function MaterialsPage() {
               </table>
             </div>
 
-            <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-xs shrink-0">
-              <span className="text-slate-400">Current Stock in Hand:</span>
-              <span className="text-base font-black text-white">
+            <div className="pt-3 border-t border-slate-200 flex justify-between items-center text-xs shrink-0">
+              <span className="text-slate-600 font-semibold">Current Stock in Hand:</span>
+              <span className="text-base font-black text-slate-900">
                 {movementMaterial.current_qty} {movementMaterial.unit || 'pcs'}
               </span>
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
     </div>

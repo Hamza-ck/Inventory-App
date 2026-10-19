@@ -1,5 +1,4 @@
-import { motion } from 'framer-motion'
-import { X, Printer, Download, CheckCircle2, ShieldCheck, AlertCircle } from 'lucide-react'
+import { X, Printer, ShieldCheck } from 'lucide-react'
 
 export default function InvoicePrintModal({ isOpen, onClose, invoice }) {
   if (!isOpen || !invoice) return null
@@ -12,30 +11,27 @@ export default function InvoicePrintModal({ isOpen, onClose, invoice }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/75 backdrop-blur-xs overflow-y-auto font-sans">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/50 overflow-y-auto font-sans">
+      <div
+        className="w-full max-w-3xl bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden my-auto"
       >
         {/* Modal Controls (Hidden in Print) */}
-        <div className="bg-slate-900 text-white p-4 flex items-center justify-between no-print">
+        <div className="bg-slate-100 border-b border-slate-200 text-slate-900 p-4 flex items-center justify-between no-print">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-sm">Tax Invoice Preview</span>
-            <span className="text-xs text-slate-400 font-mono">#{invoice.voucher_no}</span>
+            <span className="font-bold text-sm text-slate-900">Tax Invoice Preview</span>
+            <span className="text-xs text-slate-500 font-mono">#{invoice.voucher_no}</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrint}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors"
             >
               <Printer className="w-4 h-4" />
               <span>Print Invoice</span>
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -171,7 +167,7 @@ export default function InvoicePrintModal({ isOpen, onClose, invoice }) {
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }

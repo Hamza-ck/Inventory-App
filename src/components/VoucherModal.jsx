@@ -1,671 +1,461 @@
-import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Plus, 
-  Trash2, 
-  Check, 
-  AlertCircle, 
-  CreditCard, 
-  FileText, 
-  DollarSign, 
-  Layers,
-  ArrowRightLeft,
-  Calendar,
-  User,
-  Hash,
-  ShieldCheck,
-  Building2,
-  Package
-} from 'lucide-react'
-import { accDb, createVoucher, updateVoucher } from '../lib/accountingDb'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { X, Plus, Trash2, Check, AlertCircle, ShieldCheck, Package, User } from 'lucide-react'
+import { createVoucher, updateVoucher, nextVoucherNo, isCashName } from '../lib/accountingDb'
+import { useRows } from '../lib/useTable'
+import { todayISO, r2, inr } from '../lib/format'
 import { useAuth } from '../context/AuthContext'
+import { useUI } from '../context/UIContext'
+import { useVoucherEditor } from '../context/VoucherEditorContext'
 
 const VOUCHER_TYPES = [
-  { id: 'sales', label: 'Sales (F8)', color: 'bg-emerald-600 text-white', border: 'border-emerald-600' },
-  { id: 'purchase', label: 'Purchase (F9)', color: 'bg-blue-600 text-white', border: 'border-blue-600' },
-  { id: 'receipt', label: 'Receipt (F6)', color: 'bg-teal-600 text-white', border: 'border-teal-600' },
-  { id: 'payment', label: 'Payment (F5)', color: 'bg-rose-600 text-white', border: 'border-rose-600' },
-  { id: 'contra', label: 'Contra (F4)', color: 'bg-amber-600 text-white', border: 'border-amber-600' },
-  { id: 'journal', label: 'Journal (F7)', color: 'bg-indigo-600 text-white', border: 'border-indigo-600' },
+  { id: 'sales', label: 'Sales', color: 'bg-emerald-600 text-white' },
+  { id: 'purchase', label: 'Purchase', color: 'bg-blue-600 text-white' },
+  { id: 'receipt', label: 'Receipt', color: 'bg-teal-600 text-white' },
+  { id: 'payment', label: 'Payment', color: 'bg-rose-600 text-white' },
+  { id: 'contra', label: 'Contra', color: 'bg-amber-600 text-white' },
 ]
+const TYPE_HELP = {
+  sales: 'Sell materials to a customer',
+  purchase: 'Buy materials from a supplier',
+  receipt: 'Money received from a customer, or a loan taken',
+  payment: 'Money paid to a supplier, an expense, or a loan EMI',
+  contra: 'Move money between cash and bank' }
 
-export default function VoucherModal({ isOpen, onClose, editingVoucher = null, onSuccess }) {
-  const { isAdmin, isOwner } = useAuth()
+const inputCls =
+  'w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600'
+const labelCls = 'block text-xs font-bold text-slate-700 mb-1'
+const blankLine = () => ({ key: Math.random().toString(36).slice(2), material_id: '', text: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', sku: '', name: '' })
 
-  // Form State
-  const [voucherType, setVoucherType] = useState('sales')
-  const [voucherNo, setVoucherNo] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [partyName, setPartyName] = useState('')
-  const [partyPhone, setPartyPhone] = useState('')
-  const [paymentMode, setPaymentMode] = useState('HDFC Bank')
-  const [narration, setNarration] = useState('')
-  const [referenceNo, setReferenceNo] = useState('')
+const isAccount = (l) => l.group === 'Cash-in-hand' || l.group === 'Bank Accounts'
+const isOtherLedger = (l) => !isAccount(l) && !/^(sales|purchase) accounts$/i.test(l.group || '')
 
-  // Ledgers for Contra, Receipt, Payment, Journal
-  const [debitLedgerId, setDebitLedgerId] = useState('')
-  const [creditLedgerId, setCreditLedgerId] = useState('')
+// Legacy vouchers only stored a mode string ("HDFC Bank"); find the ledger it meant.
+function guessAccount(mode, accounts) {
+  const m = String(mode || '').toLowerCase()
+  if (!m) return ''
+  const exact = accounts.find((l) => l.name.toLowerCase() === m)
+  if (exact) return String(exact.id)
+  const tokens = m.split(/[^a-z0-9]+/).filter((t) => t.length > 2 && !['bank', 'account', 'accounts', 'current'].includes(t))
+  const hit = accounts.find((l) => tokens.some((t) => l.name.toLowerCase().includes(t)))
+  return hit ? String(hit.id) : ''
+}
 
-  // Sales / Purchase Inventory Line Items
-  const [items, setItems] = useState([
-    { material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }
-  ])
+export default function VoucherModal({ isOpen, editingVoucher = null, initial = null, onClose }) {
+  const { isOwner } = useAuth()
+  if (!isOpen || isOwner) return null // owners are view-only; the entry buttons are hidden for them too
+  return <VoucherForm editingVoucher={editingVoucher} initial={initial} onClose={onClose} />
+}
 
-  // Paid amount (for split credit/cash sales)
-  const [paidAmount, setPaidAmount] = useState(0)
+function VoucherForm({ editingVoucher, initial, onClose }) {
+  const editing = editingVoucher
+  const ui = useUI()
+  const { openVoucher } = useVoucherEditor()
+  const materials = useRows('materials')
+  const parties = useRows('parties')
+  const ledgers = useRows('ledgers')
+  const formRef = useRef(null)
 
-  // Direct Amount for non-inventory vouchers (Receipt, Payment, Contra, Journal)
-  const [directAmount, setDirectAmount] = useState(0)
-
-  // Data Sources
-  const [materials, setMaterials] = useState([])
-  const [parties, setParties] = useState([])
-  const [ledgers, setLedgers] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  // Load master data on open
-  useEffect(() => {
-    if (!isOpen) return
-    loadMasters()
-  }, [isOpen])
-
-  // Populate editing data if modifying existing voucher
-  useEffect(() => {
-    if (editingVoucher) {
-      setVoucherType(editingVoucher.voucher_type || 'sales')
-      setVoucherNo(editingVoucher.voucher_no || '')
-      setDate(editingVoucher.date || new Date().toISOString().slice(0, 10))
-      setPartyName(editingVoucher.party_name || '')
-      setPartyPhone(editingVoucher.party_phone || '')
-      setPaymentMode(editingVoucher.payment_mode || 'HDFC Bank')
-      setNarration(editingVoucher.narration || '')
-      setReferenceNo(editingVoucher.reference_no || '')
-      setPaidAmount(Number(editingVoucher.paid_amount) || 0)
-      setDirectAmount(Number(editingVoucher.amount) || 0)
-      setDebitLedgerId(editingVoucher.debit_ledger_id || '')
-      setCreditLedgerId(editingVoucher.credit_ledger_id || '')
-
-      if (Array.isArray(editingVoucher.items) && editingVoucher.items.length > 0) {
-        setItems(editingVoucher.items.map((it) => ({
-          ...it,
-          amount: (Number(it.qty) || 0) * (Number(it.rate) || 0),
-        })))
-      } else {
-        setItems([{ material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }])
-      }
-    } else {
-      // Reset defaults
-      setVoucherType('sales')
-      setVoucherNo(`INV-${Date.now().toString().slice(-5)}`)
-      setDate(new Date().toISOString().slice(0, 10))
-      setPartyName('')
-      setPartyPhone('')
-      setPaymentMode('HDFC Bank')
-      setNarration('')
-      setReferenceNo('')
-      setPaidAmount(0)
-      setDirectAmount(0)
-      setDebitLedgerId('')
-      setCreditLedgerId('')
-      setItems([{ material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }])
-      setError(null)
-    }
-  }, [editingVoucher, isOpen])
-
-  async function loadMasters() {
-    const mats = await accDb.materials.toArray()
-    const pts = await accDb.parties.toArray()
-    const ldgs = await accDb.ledgers.toArray()
-    setMaterials(mats)
-    setParties(pts)
-    setLedgers(ldgs)
-  }
-
-  // Calculate items total
-  const itemsTotal = items.reduce((acc, it) => acc + (Number(it.amount) || 0), 0)
-  const totalAmount = voucherType === 'sales' || voucherType === 'purchase' ? itemsTotal : Number(directAmount) || 0
-  const dueAmount = Math.max(0, totalAmount - Number(paidAmount || 0))
-
-  // Find if current party has permanent UID
-  const matchedParty = parties.find(
-    (p) => p.name.trim().toLowerCase() === partyName.trim().toLowerCase()
+  const [type, setType] = useState(editing?.voucher_type || initial?.type || 'sales')
+  const [voucherNo, setVoucherNo] = useState(editing?.voucher_no || '')
+  const [autoNo, setAutoNo] = useState('')
+  const [date, setDate] = useState(editing?.date || todayISO())
+  const [partyName, setPartyName] = useState(editing?.party_name || initial?.partyName || '')
+  const [partyPhone, setPartyPhone] = useState(editing?.party_phone || '')
+  const [narration, setNarration] = useState(editing?.narration || '')
+  const [accountId, setAccountId] = useState(() => {
+    if (editing?.payment_ledger_id) return String(editing.payment_ledger_id)
+    if (editing?.voucher_type === 'receipt' && editing.debit_ledger_id) return String(editing.debit_ledger_id)
+    if (editing?.voucher_type === 'payment' && editing.credit_ledger_id) return String(editing.credit_ledger_id)
+    return ''
+  })
+  const [against, setAgainst] = useState(editing?.counter_ledger_id ? 'ledger' : 'party')
+  const [counterId, setCounterId] = useState(editing?.counter_ledger_id ? String(editing.counter_ledger_id) : '')
+  const [fromId, setFromId] = useState(editing?.credit_ledger_id ? String(editing.credit_ledger_id) : '')
+  const [toId, setToId] = useState(editing?.debit_ledger_id ? String(editing.debit_ledger_id) : '')
+  const [directAmount, setDirectAmount] = useState(editing && !editing.items?.length ? String(editing.amount || '') : initial?.amount ? String(initial.amount) : '')
+  const [payStatus, setPayStatus] = useState(() => {
+    if (!editing) return 'paid'
+    const paid = Number(editing.paid_amount) || 0
+    return paid <= 0 ? 'credit' : paid >= Number(editing.amount) ? 'paid' : 'part'
+  })
+  const [partAmount, setPartAmount] = useState(editing ? String(editing.paid_amount || '') : '')
+  const [items, setItems] = useState(() =>
+    editing?.items?.length
+      ? editing.items.map((it) => ({ ...blankLine(), ...it, text: it.name || '', material_id: it.material_id ?? '' }))
+      : [blankLine()]
   )
-  const existingPartyUid = matchedParty?.uid || null
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
 
-  // Handle line item changes
-  function updateItem(index, field, value) {
-    const newItems = [...items]
-    const item = { ...newItems[index], [field]: value }
+  // Next sequential number shown as the placeholder (blank = use it)
+  useEffect(() => {
+    if (editing) return
+    let live = true
+    nextVoucherNo(type).then((n) => live && setAutoNo(n))
+    return () => { live = false }
+  }, [type, editing])
 
-    if (field === 'material_id') {
-      const mat = materials.find((m) => String(m.id) === String(value))
-      if (mat) {
-        item.sku = mat.sku
-        item.name = mat.name
-        item.unit = mat.unit || 'pcs'
-        item.cost_rate = Number(mat.purchase_rate) || 0
-        item.rate = voucherType === 'purchase' ? Number(mat.purchase_rate) || 0 : Number(mat.sales_rate) || 0
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const accounts = useMemo(() => ledgers.filter(isAccount), [ledgers])
+  const otherLedgers = useMemo(() => ledgers.filter(isOtherLedger), [ledgers])
+  const defaultAccountId = useMemo(() => {
+    if (editing) return guessAccount(editing.payment_mode, accounts)
+    const last = localStorage.getItem('last_account_id')
+    if (last && accounts.some((l) => String(l.id) === last)) return last
+    return String((accounts.find((l) => l.group === 'Cash-in-hand') || accounts[0])?.id ?? '')
+  }, [accounts, editing])
+  const effectiveAccountId = accountId || defaultAccountId
+
+  const isTrade = type === 'sales' || type === 'purchase'
+  const partyKind = type === 'sales' || type === 'receipt' ? 'debtor' : 'creditor'
+  const partyOptions = parties.filter((p) => p.type === partyKind)
+  const matchedParty = partyOptions.find((p) => p.name.trim().toLowerCase() === partyName.trim().toLowerCase())
+
+  // ---- money ----
+  const lines = items.map((it) => ({ ...it, amount: r2((Number(it.qty) || 0) * (Number(it.rate) || 0)) }))
+  const itemsTotal = r2(lines.reduce((a, l) => a + l.amount, 0))
+  const total = isTrade ? itemsTotal : r2(Number(directAmount) || 0)
+  const paid = !isTrade || payStatus === 'paid' ? total : payStatus === 'credit' ? 0 : Math.min(r2(Number(partAmount) || 0), total)
+  const due = r2(total - paid)
+  const movesMoney = !isTrade || paid > 0
+
+  // stock already taken by THIS voucher (when editing) is available again
+  const ownQty = (m) =>
+    editing?.voucher_type === 'sales'
+      ? (editing.items || []).filter((it) => Number(it.material_id) === m.id || it.sku === m.sku).reduce((a, it) => a + (Number(it.qty) || 0), 0)
+      : 0
+
+  function setLine(i, patch) {
+    setItems((list) => list.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
+  }
+  function onMaterialText(i, text) {
+    const q = text.trim().toLowerCase()
+    const m = materials.find((x) => x.name.toLowerCase() === q || String(x.sku).toLowerCase() === q)
+    if (!m) return setLine(i, { text, material_id: '' })
+    setLine(i, {
+      text: m.name,
+      material_id: m.id,
+      sku: m.sku,
+      name: m.name,
+      unit: m.unit || 'pcs',
+      cost_rate: Number(m.purchase_rate) || 0,
+      rate: type === 'purchase' ? Number(m.purchase_rate) || 0 : Number(m.sales_rate) || 0 })
+  }
+
+  function validate() {
+    if (isTrade) {
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].material_id) return `Line ${i + 1}: choose a material from the list`
+        if (!(Number(lines[i].qty) > 0)) return `Line ${i + 1}: enter a quantity`
       }
+      if (total <= 0) return 'Invoice total must be greater than zero'
+      if (payStatus === 'part' && !(paid > 0 && paid < total)) return 'Part payment must be more than 0 and less than the total'
+    } else if (total <= 0) {
+      return 'Enter an amount'
     }
 
-    if (field === 'qty' || field === 'rate' || field === 'material_id') {
-      const q = Number(field === 'qty' ? value : item.qty) || 0
-      const r = Number(field === 'rate' ? value : item.rate) || 0
-      item.amount = q * r
+    const name = partyName.trim()
+    if (type === 'sales' && due > 0 && isCashName(name)) return 'Enter the customer name: a balance is due from them'
+    if (type === 'purchase' && !name) return 'Enter the supplier name'
+    if ((type === 'receipt' || type === 'payment') && against === 'party' && !name) return 'Choose the party'
+    if ((type === 'receipt' || type === 'payment') && against === 'ledger' && !counterId) return 'Choose the ledger (expense / loan)'
+    if (type === 'contra') {
+      if (!fromId || !toId) return 'Choose both accounts'
+      if (fromId === toId) return 'From and To accounts must be different'
+    } else if (movesMoney && !effectiveAccountId) {
+      return 'Add a cash or bank account first (Cash & Loans page)'
     }
-
-    newItems[index] = item
-    setItems(newItems)
-
-    // Auto set paid amount if user hasn't modified it
-    if (!editingVoucher && paidAmount === 0 && (field === 'qty' || field === 'rate')) {
-      const newTotal = newItems.reduce((acc, it) => acc + (Number(it.amount) || 0), 0)
-      // default paid amount to 0 (credit) or full
-    }
+    return null
   }
 
-  function addItem() {
-    setItems([
-      ...items,
-      { material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }
-    ])
-  }
-
-  function removeItem(index) {
-    if (items.length <= 1) return
-    setItems(items.filter((_, i) => i !== index))
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (isOwner) {
-      alert('Owner account is in Read and Track mode. Only Admin has full data entry access.')
-      return
-    }
-
-    if (!partyName && (voucherType === 'sales' || voucherType === 'purchase' || voucherType === 'receipt' || voucherType === 'payment')) {
-      setError('Please select or enter Party Name')
-      return
-    }
-
-    if ((voucherType === 'sales' || voucherType === 'purchase') && itemsTotal <= 0) {
-      setError('Please select at least one material with a valid quantity and rate')
-      return
-    }
-
-    setLoading(true)
+  async function save(andNew = false) {
+    const problem = validate()
+    if (problem) return setError(problem)
+    setSaving(true)
     setError(null)
-
     try {
-      const voucherPayload = {
-        voucher_type: voucherType,
-        voucher_no: voucherNo || `VCH-${Date.now().toString().slice(-6)}`,
+      const account = accounts.find((l) => String(l.id) === String(effectiveAccountId))
+      const byLedger = (type === 'receipt' || type === 'payment') && against === 'ledger'
+      const payload = {
+        voucher_type: type,
+        voucher_no: voucherNo.trim(),
         date,
-        party_name: partyName.trim(),
+        party_name: byLedger || type === 'contra' ? '' : partyName.trim(),
         party_phone: partyPhone.trim(),
-        payment_mode: paymentMode,
+        payment_ledger_id: type !== 'contra' && movesMoney ? Number(effectiveAccountId) : null,
+        payment_mode: type !== 'contra' && movesMoney ? account?.name || '' : '',
+        counter_ledger_id: byLedger ? Number(counterId) : null,
+        debit_ledger_id: type === 'contra' ? Number(toId) : null,
+        credit_ledger_id: type === 'contra' ? Number(fromId) : null,
         narration: narration.trim(),
-        reference_no: referenceNo.trim(),
-        amount: totalAmount,
-        paid_amount: voucherType === 'sales' || voucherType === 'purchase' ? Number(paidAmount) || 0 : totalAmount,
-        due_amount: voucherType === 'sales' || voucherType === 'purchase' ? dueAmount : 0,
-        debit_ledger_id: debitLedgerId || null,
-        credit_ledger_id: creditLedgerId || null,
-        items: voucherType === 'sales' || voucherType === 'purchase' ? items : [],
+        amount: total,
+        paid_amount: paid,
+        due_amount: isTrade ? due : 0,
+        items: isTrade
+          ? lines.map(({ key: _k, text: _t, ...l }) => ({ ...l, material_id: Number(l.material_id), qty: Number(l.qty), rate: Number(l.rate) }))
+          : [] }
+      if (type === 'contra') {
+        const f = ledgers.find((l) => String(l.id) === fromId)
+        const t = ledgers.find((l) => String(l.id) === toId)
+        payload.party_name = `${f?.name} → ${t?.name}`
       }
 
-      if (editingVoucher?.id) {
-        await updateVoucher(editingVoucher.id, voucherPayload)
-      } else {
-        await createVoucher(voucherPayload)
-      }
-
-      setLoading(false)
-      onSuccess?.()
-      onClose()
+      const saved = editing?.id ? await updateVoucher(editing.id, payload) : await createVoucher(payload)
+      if (payload.payment_ledger_id) localStorage.setItem('last_account_id', String(payload.payment_ledger_id))
+      ui.toast(`${editing ? 'Updated' : 'Saved'} ${saved.voucher_no} · ${inr(total)}`)
+      if (andNew && !editing) openVoucher(null, { type })
+      else onClose()
     } catch (err) {
-      console.error(err)
       setError(err.message || 'Failed to save voucher')
-      setLoading(false)
+      setSaving(false)
     }
   }
 
-  if (!isOpen) return null
+  const accountLabel = type === 'sales' || type === 'receipt' ? 'Received in' : 'Paid from'
+  const uidHint =
+    type === 'sales' &&
+    (matchedParty?.uid ? (
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300 text-[11px] font-semibold">
+        <ShieldCheck className="w-3.5 h-3.5" /> {matchedParty.uid}
+      </span>
+    ) : due > 0 && !isCashName(partyName) ? (
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-[11px] font-semibold">
+        <ShieldCheck className="w-3.5 h-3.5" /> Balance due → customer gets a permanent UID
+      </span>
+    ) : null)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 15 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 15 }}
-        className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92vh] flex flex-col font-sans"
-      >
-        {/* Header with Tally Voucher Types */}
-        <div className="bg-slate-900 text-white p-4 sm:p-5 flex items-center justify-between border-b border-slate-800 shrink-0">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-5 bg-slate-900/50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-label="Voucher" className="w-full max-w-3xl bg-white sm:rounded-2xl shadow-xl border border-slate-200 overflow-hidden h-full sm:h-auto sm:max-h-[94vh] flex flex-col text-slate-900">
+        <div className="bg-white border-b border-slate-200 text-slate-900 px-4 py-3 flex items-center justify-between shrink-0">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold uppercase tracking-wider bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                Tally Accounting Engine
-              </span>
-              {isOwner && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                  Read & Track Only (Owner)
-                </span>
-              )}
-            </div>
-            <h2 className="text-xl font-bold text-white mt-1">
-              {editingVoucher ? `Modify Voucher: ${editingVoucher.voucher_no}` : 'Create New Accounting Voucher'}
-            </h2>
+            <h2 className="text-lg font-black text-slate-900">{editing ? `Edit ${editing.voucher_no}` : 'New voucher'}</h2>
+            <p className="text-[11px] text-slate-500 font-medium">{TYPE_HELP[type] || 'Edit voucher'} · Ctrl+Enter to save · Esc to close</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-          >
+          <button type="button" onClick={onClose} aria-label="Close" className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Voucher Type Tabs (Sales F8, Purchase F9, Receipt F6, Payment F5, Contra F4, Journal F7) */}
-        {!editingVoucher && (
-          <div className="bg-slate-100 p-2 border-b border-slate-200 flex flex-wrap gap-1.5 shrink-0">
+        {!editing && (
+          <div className="bg-slate-100 p-2 border-b border-slate-200 flex gap-1.5 overflow-x-auto shrink-0" role="tablist">
             {VOUCHER_TYPES.map((vt) => (
               <button
                 key={vt.id}
                 type="button"
-                onClick={() => {
-                  setVoucherType(vt.id)
-                  setError(null)
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  voucherType === vt.id
-                    ? `${vt.color} shadow-xs scale-102`
-                    : 'bg-white text-slate-700 hover:bg-slate-200/80 border border-slate-200'
-                }`}
+                role="tab"
+                aria-selected={type === vt.id}
+                onClick={() => { setType(vt.id); setError(null) }}
+                className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap ${type === vt.id ? vt.color : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-200/80'}`}
               >
-                <span>{vt.label}</span>
+                {vt.label}
               </button>
             ))}
           </div>
         )}
 
-        {/* Body Form */}
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
-          {error && (
-            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Top Fields: Voucher No, Date, Reference */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Voucher No</label>
-              <div className="relative">
-                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  value={voucherNo}
-                  onChange={(e) => setVoucherNo(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  placeholder="e.g. INV-001"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                />
+        <form
+          ref={formRef}
+          onSubmit={(e) => { e.preventDefault(); save(false) }}
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); formRef.current.requestSubmit() }
+            else if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault() // Enter must not save by accident
+          }}
+          className="flex flex-col flex-1 min-h-0"
+        >
+          <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls} htmlFor="vm-no">Voucher no.</label>
+                <input id="vm-no" className={inputCls} value={voucherNo} onChange={(e) => setVoucherNo(e.target.value)} placeholder={autoNo || 'Auto'} />
+              </div>
+              <div>
+                <label className={labelCls} htmlFor="vm-date">Date</label>
+                <input id="vm-date" type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} required />
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Voucher Date</label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                />
-              </div>
-            </div>
+            {/* ---- who ---- */}
+            {type !== 'contra' && (
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
+                {(type === 'receipt' || type === 'payment') && (
+                  <div className="flex gap-1.5">
+                    {[['party', type === 'receipt' ? 'From customer' : 'To supplier'], ['ledger', type === 'receipt' ? 'Loan / other income' : 'Expense / loan EMI']].map(([id, label]) => (
+                      <button key={id} type="button" onClick={() => setAgainst(id)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${against === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-300'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode / Bank</label>
-              <select
-                value={paymentMode}
-                onChange={(e) => setPaymentMode(e.target.value)}
-                disabled={isOwner}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-              >
-                <option value="HDFC Bank">HDFC Bank Current A/c</option>
-                <option value="State Bank of India">SBI Current A/c</option>
-                <option value="Cash">Cash in Hand</option>
-                <option value="Credit / Due">Credit / On Account</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Party Selection & Internal UID Notification */}
-          {(voucherType === 'sales' || voucherType === 'purchase' || voucherType === 'receipt' || voucherType === 'payment') && (
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <User className="w-4 h-4 text-blue-600" />
-                  <span>
-                    {voucherType === 'sales' || voucherType === 'receipt' ? 'Customer / Debtor Party' : 'Supplier / Creditor Party'}
-                  </span>
-                </label>
-
-                {/* Live UID Indicator Badge */}
-                {voucherType === 'sales' && (
-                  <div className="text-[11px] font-semibold">
-                    {existingPartyUid ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
-                        <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Permanent UID: <strong>{existingPartyUid}</strong></span>
-                      </span>
-                    ) : dueAmount > 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
-                        <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Closing Due (₹{dueAmount.toLocaleString()}) → Auto assigns permanent UID</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Settled Upfront → Direct Sales (No UID)</span>
-                      </span>
+                {against === 'ledger' && (type === 'receipt' || type === 'payment') ? (
+                  <div>
+                    <label className={labelCls} htmlFor="vm-counter">Ledger</label>
+                    <select id="vm-counter" className={inputCls} value={counterId} onChange={(e) => setCounterId(e.target.value)}>
+                      <option value="">Select ledger…</option>
+                      {otherLedgers.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.group})</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5" htmlFor="vm-party">
+                        <User className="w-3.5 h-3.5 text-blue-600" />
+                        {partyKind === 'debtor' ? 'Customer' : 'Supplier'}
+                        {type === 'sales' && <span className="font-normal text-slate-500">(leave blank for a cash sale)</span>}
+                      </label>
+                      {uidHint}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input id="vm-party" autoFocus={type !== 'sales'} list="vm-parties" className={inputCls} placeholder="Type or pick a name…" value={partyName} onChange={(e) => setPartyName(e.target.value)} autoComplete="off" />
+                      {type === 'sales' && !matchedParty && !isCashName(partyName) && (
+                        <input className={inputCls} inputMode="tel" placeholder="Phone (optional)" value={partyPhone} onChange={(e) => setPartyPhone(e.target.value)} />
+                      )}
+                    </div>
+                    <datalist id="vm-parties">
+                      {partyOptions.map((p) => <option key={p.id} value={p.name}>{`${p.uid ? `[${p.uid}] ` : ''}Balance ${inr(p.current_balance)}`}</option>)}
+                    </datalist>
+                    {(type === 'receipt' || type === 'payment') && matchedParty && Number(matchedParty.current_balance) > 0 && !editing && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                        Outstanding <strong className="text-rose-600">{inr(matchedParty.current_balance)}</strong>
+                        <button type="button" onClick={() => setDirectAmount(String(matchedParty.current_balance))} className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 font-bold">
+                          Fill full amount
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
               </div>
+            )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <input
-                    type="text"
-                    list="party-suggestions"
-                    placeholder="Type or select customer/party name..."
-                    value={partyName}
-                    onChange={(e) => setPartyName(e.target.value)}
-                    disabled={isOwner}
-                    required
-                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                  />
-                  <datalist id="party-suggestions">
-                    {parties.map((p) => (
-                      <option key={p.id} value={p.name}>
-                        {p.uid ? `[${p.uid}] ` : ''}Due: ₹{Number(p.current_balance || 0).toLocaleString()}
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
-
-                <div>
-                  <input
-                    type="text"
-                    placeholder="Party Phone (optional)"
-                    value={partyPhone}
-                    onChange={(e) => setPartyPhone(e.target.value)}
-                    disabled={isOwner}
-                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Contra & Journal Ledger Pickers */}
-          {voucherType === 'contra' && (
-            <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-amber-900 mb-1">Source Account (Credit - From)</label>
-                <select
-                  value={creditLedgerId}
-                  onChange={(e) => setCreditLedgerId(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  <option value="">-- Select Source Ledger --</option>
-                  {ledgers.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.group}) - Bal: ₹{Number(l.current_balance || 0).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-amber-900 mb-1">Destination Account (Debit - To)</label>
-                <select
-                  value={debitLedgerId}
-                  onChange={(e) => setDebitLedgerId(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  <option value="">-- Select Destination Ledger --</option>
-                  {ledgers.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.group}) - Bal: ₹{Number(l.current_balance || 0).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Inventory Table for Sales & Purchase */}
-          {(voucherType === 'sales' || voucherType === 'purchase') && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                  <Package className="w-4 h-4 text-emerald-600" />
-                  <span>Material Line Items ({items.length})</span>
-                </span>
-                {!isOwner && (
-                  <button
-                    type="button"
-                    onClick={addItem}
-                    className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Item</span>
-                  </button>
-                )}
-              </div>
-
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-100/90 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200">
-                      <tr>
-                        <th className="py-2.5 px-3">Material / Item</th>
-                        <th className="py-2.5 px-3 w-24">Qty</th>
-                        <th className="py-2.5 px-3 w-20">Unit</th>
-                        <th className="py-2.5 px-3 w-28">Rate (₹)</th>
-                        <th className="py-2.5 px-3 w-32 text-right">Amount (₹)</th>
-                        {!isOwner && <th className="py-2.5 px-2 w-10 text-center"></th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {items.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/60">
-                          <td className="p-2 px-3">
-                            <select
-                              value={item.material_id}
-                              onChange={(e) => updateItem(idx, 'material_id', e.target.value)}
-                              disabled={isOwner}
-                              required
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-600 disabled:opacity-60"
-                            >
-                              <option value="">-- Choose Material --</option>
-                              {materials.map((m) => (
-                                <option key={m.id} value={m.id}>
-                                  {m.name} [Stock: {m.current_qty} {m.unit}] - ₹{voucherType === 'purchase' ? m.purchase_rate : m.sales_rate}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="p-2 px-3">
-                            <input
-                              type="number"
-                              min="0.01"
-                              step="any"
-                              value={item.qty}
-                              onChange={(e) => updateItem(idx, 'qty', e.target.value)}
-                              disabled={isOwner}
-                              required
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-600 text-right disabled:opacity-60"
-                            />
-                          </td>
-                          <td className="p-2 px-3 text-slate-500 font-medium">{item.unit || 'pcs'}</td>
-                          <td className="p-2 px-3">
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={item.rate}
-                              onChange={(e) => updateItem(idx, 'rate', e.target.value)}
-                              disabled={isOwner}
-                              required
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-600 text-right disabled:opacity-60"
-                            />
-                          </td>
-                          <td className="p-2 px-3 text-right font-bold text-slate-900">
-                            ₹{Number(item.amount || 0).toLocaleString()}
-                          </td>
-                          {!isOwner && (
-                            <td className="p-2 px-2 text-center">
-                              {items.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeItem(idx)}
-                                  className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
-                                  title="Remove item"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Total & Split Payment (Paid vs Due) */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="w-full sm:w-auto space-y-1">
-                  <div className="text-xs text-slate-500">Invoice Net Total</div>
-                  <div className="text-2xl font-black text-slate-900">
-                    ₹{itemsTotal.toLocaleString()}
+            {type === 'contra' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-amber-50/60 p-3 rounded-xl border border-amber-200">
+                {[['From', fromId, setFromId], ['To', toId, setToId]].map(([label, val, set]) => (
+                  <div key={label}>
+                    <label className={labelCls}>{label}</label>
+                    <select className={inputCls} value={val} onChange={(e) => set(e.target.value)}>
+                      <option value="">Select account…</option>
+                      {accounts.map((l) => <option key={l.id} value={l.id}>{l.name} · {inr(l.current_balance)}</option>)}
+                    </select>
                   </div>
-                </div>
-
-                <div className="w-full sm:w-auto flex flex-wrap items-center gap-4">
-                  <div>
-                    <label className="block text-[11px] font-bold text-emerald-800 mb-0.5">Paid Upfront (₹)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={paidAmount}
-                      onChange={(e) => setPaidAmount(e.target.value)}
-                      disabled={isOwner}
-                      className="w-32 px-3 py-1.5 bg-white border border-emerald-300 rounded-lg text-xs font-bold text-emerald-900 text-right focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-rose-800 mb-0.5">Closing Due (Credit)</label>
-                    <div className="w-32 px-3 py-1.5 bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold text-rose-900 text-right">
-                      ₹{dueAmount.toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Direct Amount for Receipt, Payment, Contra, Journal */}
-          {(voucherType === 'receipt' || voucherType === 'payment' || voucherType === 'contra' || voucherType === 'journal') && (
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                Voucher Amount (₹)
-              </label>
-              <div className="relative max-w-xs">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="number"
-                  min="1"
-                  step="any"
-                  value={directAmount}
-                  onChange={(e) => setDirectAmount(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  placeholder="0.00"
-                  className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-base font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Narration */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Narration / Remarks</label>
-            <textarea
-              rows={2}
-              value={narration}
-              onChange={(e) => setNarration(e.target.value)}
-              disabled={isOwner}
-              placeholder="e.g. Sold on 30-day credit terms, transport via SafeXpress"
-              className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-            />
-          </div>
-
-          {/* Actions */}
-          <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
-            >
-              Cancel
-            </button>
-
-            {!isOwner ? (
-              <button
-                type="submit"
-                disabled={loading}
-                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/30 transition-all flex items-center gap-1.5 disabled:opacity-50"
-              >
-                {loading ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>{editingVoucher ? 'Update Voucher' : 'Post Voucher (Save)'}</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <div className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-200 text-slate-500 cursor-not-allowed">
-                Read-Only (Owner Mode)
+                ))}
               </div>
             )}
+
+            {/* ---- items ---- */}
+            {isTrade && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                    <Package className="w-4 h-4 text-emerald-600" /> Items ({items.length})
+                  </span>
+                  <button type="button" onClick={() => setItems((l) => [...l, blankLine()])} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">
+                    <Plus className="w-3.5 h-3.5" /> Add item
+                  </button>
+                </div>
+                <datalist id="vm-materials">
+                  {materials.map((m) => <option key={m.id} value={m.name}>{`${m.sku} · ${m.current_qty} ${m.unit} in stock`}</option>)}
+                </datalist>
+
+                <div className="space-y-2">
+                  {lines.map((l, i) => {
+                    const m = materials.find((x) => x.id === Number(l.material_id))
+                    const short = type === 'sales' && m && Number(l.qty) > (Number(m.current_qty) || 0) + ownQty(m)
+                    return (
+                      <div key={l.key} className="grid grid-cols-12 gap-2 items-start p-2 rounded-xl border border-slate-200 bg-white">
+                        <div className="col-span-12 sm:col-span-5">
+                          <input aria-label={`Material ${i + 1}`} list="vm-materials" className={inputCls} placeholder="Search material or SKU…" value={l.text} onChange={(e) => onMaterialText(i, e.target.value)} autoComplete="off" autoFocus={i === 0 && type === 'sales'} />
+                          {m && <div className={`mt-1 text-[11px] ${short ? 'text-amber-600 font-bold' : 'text-slate-500'}`}>{short ? `Only ${m.current_qty} ${m.unit} in stock: stock will go negative` : `${m.current_qty} ${m.unit} in stock`}</div>}
+                        </div>
+                        <div className="col-span-4 sm:col-span-2">
+                          <input aria-label="Quantity" type="number" inputMode="decimal" min="0" step="any" className={`${inputCls} text-right`} value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} />
+                          <div className="mt-1 text-[11px] text-slate-500 text-right">{l.unit}</div>
+                        </div>
+                        <div className="col-span-4 sm:col-span-2">
+                          <input aria-label="Rate" type="number" inputMode="decimal" min="0" step="any" className={`${inputCls} text-right`} value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} />
+                          <div className="mt-1 text-[11px] text-slate-500 text-right">rate ₹</div>
+                        </div>
+                        <div className="col-span-3 sm:col-span-2 text-right font-bold text-slate-900 text-sm pt-2">{inr(l.amount)}</div>
+                        <div className="col-span-1 pt-1.5 text-right">
+                          {items.length > 1 && (
+                            <button type="button" aria-label="Remove item" onClick={() => setItems((list) => list.filter((_, idx) => idx !== i))} className="p-1.5 text-slate-400 hover:text-rose-600">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">Total</span>
+                    <span className="text-2xl font-black text-slate-900">{inr(itemsTotal)}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[['paid', 'Paid in full'], ['credit', 'On credit'], ['part', 'Part payment']].map(([id, label]) => (
+                      <button key={id} type="button" onClick={() => setPayStatus(id)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${payStatus === id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-300'}`}>
+                        {label}
+                      </button>
+                    ))}
+                    {payStatus === 'part' && (
+                      <input aria-label="Amount paid now" type="number" inputMode="decimal" min="0" step="any" className={`${inputCls} w-36 text-right`} placeholder="Paid now ₹" value={partAmount} onChange={(e) => setPartAmount(e.target.value)} />
+                    )}
+                    {due > 0 && <span className="ml-auto text-xs font-bold text-rose-600">Due {inr(due)}</span>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!isTrade && (
+              <div>
+                <label className={labelCls} htmlFor="vm-amt">Amount (₹)</label>
+                <input id="vm-amt" type="number" inputMode="decimal" min="0" step="any" className={`${inputCls} max-w-xs text-lg font-black`} value={directAmount} onChange={(e) => setDirectAmount(e.target.value)} placeholder="0.00" autoFocus={type === 'contra'} />
+              </div>
+            )}
+
+            {type !== 'contra' && movesMoney && (
+              <div>
+                <label className={labelCls} htmlFor="vm-account">{accountLabel}</label>
+                <select id="vm-account" className={`${inputCls} max-w-sm`} value={effectiveAccountId} onChange={(e) => setAccountId(e.target.value)}>
+                  {accounts.length === 0 && <option value="">No cash/bank account yet</option>}
+                  {accounts.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className={labelCls} htmlFor="vm-narr">Narration (optional)</label>
+              <textarea id="vm-narr" rows={2} className={inputCls} value={narration} onChange={(e) => setNarration(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200 p-3 sm:p-4 shrink-0 space-y-2 bg-white">
+            {error && (
+              <div role="alert" className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" /> {error}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+              {!editing && (
+                <button type="button" disabled={saving} onClick={() => save(true)} className="px-4 py-2.5 rounded-xl text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 disabled:opacity-50">
+                  Save &amp; new
+                </button>
+              )}
+              <button type="submit" disabled={saving} className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md disabled:opacity-50 flex items-center gap-1.5">
+                <Check className="w-4 h-4" /> {saving ? 'Saving…' : editing ? 'Update' : 'Save'}
+              </button>
+            </div>
           </div>
         </form>
-      </motion.div>
+      </div>
     </div>
   )
 }
