@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx'
+import { todayISO } from './format.js'
 
 /**
  * Tally Integration Engine
@@ -7,7 +8,7 @@ import * as XLSX from 'xlsx'
 
 // Format Tally date 'YYYYMMDD' or 'DD-MM-YYYY' into 'YYYY-MM-DD'
 export function formatTallyDate(rawDate) {
-  if (!rawDate) return new Date().toISOString().slice(0, 10)
+  if (!rawDate) return todayISO()
   const str = String(rawDate).trim()
 
   // YYYYMMDD (e.g. 20261014)
@@ -36,7 +37,7 @@ export function formatTallyDate(rawDate) {
     return parsed.toISOString().slice(0, 10)
   }
 
-  return new Date().toISOString().slice(0, 10)
+  return todayISO()
 }
 
 /**
@@ -255,8 +256,8 @@ export async function parseTallyExcel(file) {
     // Check common Tally export column headers
     const date = formatTallyDate(row['Date'] || row['DATE'] || row['Voucher Date'])
     const voucherNo = row['Vch No.'] || row['Vch No'] || row['Voucher No'] || row['VOUCHER NO'] || `EXCEL-${idx + 1}`
-    const rawType = (row['Vch Type'] || row['Voucher Type'] || row['TYPE'] || 'Sales').trim()
-    const partyName = (row['Particulars'] || row['Party Name'] || row['PARTY'] || row['Account'] || 'Cash').trim()
+    const rawType = String(row['Vch Type'] || row['Voucher Type'] || row['TYPE'] || 'Sales').trim()
+    const partyName = String(row['Particulars'] || row['Party Name'] || row['PARTY'] || row['Account'] || 'Cash').trim()
     const debit = parseFloat(row['Debit Amount'] || row['Debit'] || row['DEBIT'] || 0) || 0
     const credit = parseFloat(row['Credit Amount'] || row['Credit'] || row['CREDIT'] || 0) || 0
     const narration = row['Narration'] || row['Remarks'] || ''
@@ -270,7 +271,8 @@ export async function parseTallyExcel(file) {
     else if (lowerType.includes('contra')) voucherType = 'contra'
     else if (lowerType.includes('journal')) voucherType = 'journal'
 
-    const amount = Math.max(debit, credit) || 1000
+    const amount = Math.max(debit, credit)
+    if (!amount) return // never invent an amount for blank rows
 
     result.vouchers.push({
       voucher_no: voucherNo,
@@ -349,7 +351,7 @@ export function generateTallyExportXml({ vouchers = [], materials = [], parties 
   // Export Vouchers
   vouchers.forEach((v) => {
     const vchType = capitalize(v.voucher_type || 'sales')
-    const tallyDate = (v.date || '').replace(/[^0-9]/g, '') || '20261014'
+    const tallyDate = (v.date || '').replace(/[^0-9]/g, '') || todayISO().replace(/-/g, '')
 
     xml += `        <TALLYMESSAGE xmlns:UDF="TallyUDF">
           <VOUCHER VCHTYPE="${vchType}" ACTION="Create">

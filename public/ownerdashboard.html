@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Owner Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #F3F6F5;
+      color: #10231F;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      overflow-x: hidden;
+      padding: 24px 16px 80px;
+    }
+
+    /* Ambient glowing orbs in the background that shine through the frosted glass */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(70px);
+    }
+
+    .orb-1 {
+      right: -80px;
+      bottom: -40px;
+      width: 440px;
+      height: 440px;
+      background: radial-gradient(circle, #0F766E 0%, rgba(15, 118, 110, 0) 70%);
+      opacity: 0.38;
+    }
+
+    .orb-2 {
+      left: -90px;
+      bottom: 25%;
+      width: 380px;
+      height: 380px;
+      background: radial-gradient(circle, #F59E0B 0%, rgba(245, 158, 11, 0) 70%);
+      opacity: 0.28;
+    }
+
+    .orb-3 {
+      right: 20%;
+      top: -60px;
+      width: 340px;
+      height: 340px;
+      background: radial-gradient(circle, #0284C7 0%, rgba(2, 132, 199, 0) 70%);
+      opacity: 0.22;
+    }
+
+    /* Apple Frosted Glassmorphism Styles applied to all cards & nav */
+    .apple-glass {
+      background: rgba(255, 255, 255, 0.65);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      backdrop-filter: blur(24px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 10px 30px rgba(16, 35, 31, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+      border-radius: 20px;
+    }
+
+    .apple-glass-hero {
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.92) 0%, rgba(11, 95, 89, 0.86) 100%);
+      -webkit-backdrop-filter: blur(24px) saturate(190%);
+      backdrop-filter: blur(24px) saturate(190%);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      box-shadow: 0 16px 36px -6px rgba(15, 118, 110, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+      border-radius: 24px;
+      color: #fff;
+    }
+
+    .apple-glass-pill {
+      background: rgba(225, 233, 231, 0.65);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.75);
+      border-radius: 14px;
+      padding: 4px;
+      display: inline-flex;
+      gap: 3px;
+    }
+
+    .apple-glass-dock {
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      height: 68px;
+      border-radius: 32px;
+      background: rgba(255, 255, 255, 0.72);
+      -webkit-backdrop-filter: blur(28px) saturate(190%);
+      backdrop-filter: blur(28px) saturate(190%);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 14px 40px rgba(16, 35, 31, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+      display: flex;
+      align-items: center;
+      padding: 6px;
+      gap: 4px;
+      z-index: 50;
+    }
+
+    /* Container */
+    .dashboard-container {
+      width: 100%;
+      max-width: 1200px;
+      position: relative;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Header */
+    .header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .shop-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      background: #0F766E;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 18px;
+      box-shadow: 0 4px 12px rgba(15, 118, 110, 0.25);
+    }
+
+    .header-title {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .header-subtitle {
+      font-size: 13px;
+      font-weight: 600;
+      color: #4A5C57;
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .tab-btn {
+      padding: 8px 18px;
+      border: 0;
+      border-radius: 10px;
+      font: 700 13px 'Manrope', sans-serif;
+      color: #4A5C57;
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn.active {
+      background: #fff;
+      color: #10231F;
+      font-weight: 800;
+      box-shadow: 0 2px 8px rgba(16, 35, 31, 0.08);
+    }
+
+    .btn-download {
+      background: #0F766E;
+      color: #fff;
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 18px;
+      font: 800 13px 'Manrope', sans-serif;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(15, 118, 110, 0.28);
+      transition: all 0.2s ease;
+    }
+
+    .btn-download:hover {
+      background: #0B5F59;
+      transform: translateY(-1px);
+    }
+
+    /* Row 1: 3 cards */
+    .grid-row-1 {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr 1fr;
+      gap: 18px;
+    }
+
+    .hero-card {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .badge-pill {
+      background: #fff;
+      color: #0F766E;
+      border-radius: 99px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+    }
+
+    .hero-val {
+      font-size: 44px;
+      font-weight: 800;
+      margin: 8px 0;
+      letter-spacing: -0.03em;
+    }
+
+    .hero-sub {
+      font-size: 12px;
+      opacity: 0.9;
+      font-weight: 600;
+    }
+
+    /* KPI Cards */
+    .kpi-card {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform 0.2s ease;
+    }
+
+    .kpi-card:hover {
+      transform: translateY(-2px);
+    }
+
+    .kpi-card.border-teal {
+      border-left: 6px solid #0F766E;
+    }
+
+    .kpi-card.border-amber {
+      border-left: 6px solid #B45309;
+    }
+
+    .kpi-card.border-slate {
+      border-left: 6px solid #334155;
+    }
+
+    .kpi-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #4A5C57;
+      text-transform: capitalize;
+    }
+
+    .kpi-val {
+      font-size: 30px;
+      font-weight: 800;
+      margin: 4px 0 2px;
+      letter-spacing: -0.02em;
+    }
+
+    .kpi-sub {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .text-teal {
+      color: #0F766E;
+    }
+
+    .text-amber {
+      color: #B45309;
+    }
+
+    .text-muted {
+      color: #4A5C57;
+    }
+
+    /* Row 2: 4 cards */
+    .grid-row-2 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+    }
+
+    /* Row 3: 2 cards */
+    .grid-row-3 {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 18px;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .card-val {
+      font-size: 15px;
+      font-weight: 800;
+      color: #0F766E;
+    }
+
+    /* Pillars */
+    .pillars-container {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+      height: 150px;
+      padding: 10px 4px 0;
+    }
+
+    .pillar-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      height: 100%;
+    }
+
+    .pillar-bar {
+      width: 100%;
+      border-radius: 8px 8px 3px 3px;
+      background: #9FD0CA;
+      transition: all 0.3s ease;
+    }
+
+    .pillar-bar.peak {
+      background: #0F766E;
+      box-shadow: 0 4px 12px rgba(15, 118, 110, 0.3);
+    }
+
+    .pillar-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: #4A5C57;
+    }
+
+    /* Table / List */
+    .debtor-row {
+      display: grid;
+      grid-template-columns: 1fr 70px 100px 84px;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 0;
+      border-top: 1px solid rgba(16, 35, 31, 0.08);
+    }
+
+    .debtor-name {
+      font-size: 14px;
+      font-weight: 800;
+      color: #10231F;
+    }
+
+    .debtor-aging {
+      display: inline-block;
+      border-radius: 99px;
+      padding: 3px 10px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+      text-align: center;
+    }
+
+    .aging-amber {
+      background: #FDEBD3;
+      color: #B45309;
+    }
+
+    .aging-teal {
+      background: #D8EFEC;
+      color: #0B5F59;
+    }
+
+    .debtor-amount {
+      font-size: 14px;
+      font-weight: 800;
+      color: #0F766E;
+      text-align: right;
+    }
+
+    .btn-remind {
+      background: rgba(255, 255, 255, 0.85);
+      color: #0F766E;
+      border: 1.5px solid #0F766E;
+      border-radius: 10px;
+      padding: 6px 12px;
+      font: 800 12px 'Manrope', sans-serif;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: center;
+    }
+
+    .btn-remind:hover {
+      background: #0F766E;
+      color: #fff;
+    }
+
+    /* Dock items */
+    .dock-btn {
+      flex: 1;
+      height: 52px;
+      border: 0;
+      border-radius: 24px;
+      background: transparent;
+      color: #2F4540;
+      font: 700 11px 'Manrope', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .dock-btn.active {
+      background: rgba(15, 118, 110, 0.16);
+      color: #0B5F59;
+      font-weight: 800;
+    }
+
+    .dock-btn svg {
+      width: 20px;
+      height: 20px;
+      stroke: currentColor;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .grid-row-1 {
+        grid-template-columns: 1fr;
+      }
+
+      .grid-row-2 {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .grid-row-3 {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Ambient background glow spheres -->
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <div class="dashboard-container">
+    <!-- Top Header -->
+    <header class="header-bar">
+      <div class="header-left">
+        <div class="shop-avatar">S</div>
+        <div>
+          <div class="header-title">Good evening</div>
+          <div class="header-subtitle">Here is how your business is doing · [Shop name]</div>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <div class="apple-glass-pill" id="period-tabs">
+          <button class="tab-btn active" onclick="switchPeriod('today')">Today</button>
+          <button class="tab-btn" onclick="switchPeriod('week')">Week</button>
+          <button class="tab-btn" onclick="switchPeriod('month')">Month</button>
+        </div>
+
+        <button class="btn-download" onclick="window.print()">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+          </svg>
+          Download report
+        </button>
+      </div>
+    </header>
+
+    <!-- Row 1: Sales Hero, Profit, Expenses in Apple Glassmorphic styling -->
+    <section class="grid-row-1">
+      <div class="apple-glass-hero hero-card">
+        <div class="hero-top">
+          <span class="kpi-title" style="color:rgba(255,255,255,0.92)" id="sales-period-label">Sales today</span>
+          <span class="badge-pill" id="sales-growth-badge">▲ 12% vs yesterday</span>
+        </div>
+        <div>
+          <div class="hero-val" id="sales-val">₹1.42L</div>
+          <div class="hero-sub" id="sales-sub">Invoices: 18 · Paid: ₹1.14L · Due: ₹28,000</div>
+        </div>
+      </div>
+
+      <div class="apple-glass kpi-card border-teal">
+        <div>
+          <div class="kpi-title">Profit</div>
+          <div class="kpi-val" id="profit-val">₹21.4K</div>
+          <div class="kpi-sub text-teal" id="profit-sub">▲ 8% vs yesterday</div>
+        </div>
+        <div class="text-muted"
+          style="font-size:11px;font-weight:700;padding-top:10px;border-top:1px solid rgba(16,35,31,0.06)">
+          Gross margin 24.8%
+        </div>
+      </div>
+
+      <div class="apple-glass kpi-card border-amber">
+        <div>
+          <div class="kpi-title">Expenses</div>
+          <div class="kpi-val" id="expenses-val">₹9.8K</div>
+          <div class="kpi-sub text-amber" id="expenses-sub">▼ 4% vs yesterday</div>
+        </div>
+        <div class="text-muted"
+          style="font-size:11px;font-weight:700;padding-top:10px;border-top:1px solid rgba(16,35,31,0.06)">
+          Operating outflow
+        </div>
+      </div>
+    </section>
+
+    <!-- Row 2: Debtors, Creditors, Inventory, Loans & Advances -->
+    <section class="grid-row-2">
+      <div class="apple-glass kpi-card border-teal">
+        <div class="kpi-title">Debtors</div>
+        <div class="kpi-val">₹8.4L</div>
+        <div class="kpi-sub text-muted">They owe you · 23</div>
+      </div>
+
+      <div class="apple-glass kpi-card border-amber">
+        <div class="kpi-title">Creditors</div>
+        <div class="kpi-val">₹5.1L</div>
+        <div class="kpi-sub text-muted">You owe · 9</div>
+      </div>
+
+      <div class="apple-glass kpi-card border-slate">
+        <div class="kpi-title">Inventory</div>
+        <div class="kpi-val">₹22.6L</div>
+        <div class="kpi-sub text-muted">Stock value · 142 items</div>
+      </div>
+
+      <div class="apple-glass kpi-card border-slate">
+        <div class="kpi-title">Loans &amp; Advances</div>
+        <div class="kpi-val">₹3.0L</div>
+        <div class="kpi-sub text-muted">Net balance</div>
+      </div>
+    </section>
+
+    <!-- Row 3: Sales 7-Day Chart & Money to Collect -->
+    <section class="grid-row-3">
+      <!-- 7-Day Chart in Apple Glass Card -->
+      <div class="apple-glass" style="padding: 24px;">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Sales, last 7 days</div>
+            <div class="header-subtitle">Daily turnover &amp; trend</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="card-val">₹9.8L</div>
+            <div class="header-subtitle">7-day total</div>
+          </div>
+        </div>
+
+        <div class="pillars-container">
+          <div class="pillar-col">
+            <div class="pillar-bar" style="height: 60px;"></div><span class="pillar-label">Mon</span>
+          </div>
+          <div class="pillar-col">
+            <div class="pillar-bar" style="height: 84px;"></div><span class="pillar-label">Tue</span>
+          </div>
+          <div class="pillar-col">
+            <div class="pillar-bar" style="height: 52px;"></div><span class="pillar-label">Wed</span>
+          </div>
+          <div class="pillar-col">
+            <div class="pillar-bar" style="height: 104px;"></div><span class="pillar-label">Thu</span>
+          </div>
+          <div class="pillar-col">
+            <div class="pillar-bar" style="height: 76px;"></div><span class="pillar-label">Fri</span>
+          </div>
+          <div class="pillar-col">
+            <div class="pillar-bar peak" style="height: 132px;"></div><span class="pillar-label"
+              style="color:#0F766E">Sat</span>
+          </div>
+          <div class="pillar-col">
+            <div class="pillar-bar" style="height: 96px;"></div><span class="pillar-label">Sun</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Money to collect list in Apple Glass Card -->
+      <div class="apple-glass" style="padding: 24px;">
+        <div class="card-header">
+          <div class="card-title">Money to collect</div>
+          <a href="#" style="font-size:12px;font-weight:800;color:#0F766E;text-decoration:none">View all 23</a>
+        </div>
+
+        <div>
+          <div class="debtor-row">
+            <div class="debtor-name">Rahul Mobile Hub</div>
+            <div><span class="debtor-aging aging-amber">60d+</span></div>
+            <div class="debtor-amount">₹1,84,200</div>
+            <button class="btn-remind" onclick="remindUser('Rahul Mobile Hub', '₹1,84,200')">Remind</button>
+          </div>
+
+          <div class="debtor-row">
+            <div class="debtor-name">City Gadget Point</div>
+            <div><span class="debtor-aging aging-teal">31–60d</span></div>
+            <div class="debtor-amount">₹96,500</div>
+            <button class="btn-remind" onclick="remindUser('City Gadget Point', '₹96,500')">Remind</button>
+          </div>
+
+          <div class="debtor-row">
+            <div class="debtor-name">Sen Telecom</div>
+            <div><span class="debtor-aging aging-teal">0–30d</span></div>
+            <div class="debtor-amount">₹71,900</div>
+            <button class="btn-remind" onclick="remindUser('Sen Telecom', '₹71,900')">Remind</button>
+          </div>
+
+          <div class="debtor-row">
+            <div class="debtor-name">Mitra Cover House</div>
+            <div><span class="debtor-aging aging-teal">0–30d</span></div>
+            <div class="debtor-amount">₹48,300</div>
+            <button class="btn-remind" onclick="remindUser('Mitra Cover House', '₹48,300')">Remind</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer timestamp -->
+    <footer style="text-align: center; font-size: 12px; font-weight: 700; color: #4A5C57; padding-top: 10px;">
+      Updated 17 Oct, 6:40 PM · TallyFlow Cloud System
+    </footer>
+  </div>
+
+  <!-- Apple Glass Floating Mobile Dock -->
+  <nav class="apple-glass-dock">
+    <a href="/" class="dock-btn active">
+      <svg fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <path d="M3 11l9-8 9 8v10H3z"></path>
+      </svg>
+      Home
+    </a>
+    <a href="/parties" class="dock-btn">
+      <svg fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <path d="M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21c0-4 3.5-6 8-6s8 2 8 6"></path>
+      </svg>
+      Debtors
+    </a>
+    <a href="/sales" class="dock-btn">
+      <svg fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <path d="M4 20V10M10 20V4M16 20v-8M22 20H2"></path>
+      </svg>
+      Sales
+    </a>
+    <a href="/materials" class="dock-btn">
+      <svg fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <path d="M3 7l9-4 9 4v10l-9 4-9-4z"></path>
+      </svg>
+      Stock
+    </a>
+    <a href="/banking" class="dock-btn">
+      <svg fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <path d="M5 12h.01M12 12h.01M19 12h.01"></path>
+      </svg>
+      More
+    </a>
+  </nav>
+
+  <script>
+    const data = {
+      today: { sales: '₹1.42L', profit: '₹21.4K', expenses: '₹9.8K', label: 'Sales today', growth: '▲ 12% vs yesterday', sub: 'Invoices: 18 · Paid: ₹1.14L · Due: ₹28,000' },
+      week: { sales: '₹9.84L', profit: '₹1.58L', expenses: '₹68.2K', label: 'Sales this week', growth: '▲ 15% vs last week', sub: 'Invoices: 124 · Paid: ₹7.90L · Due: ₹1.94L' },
+      month: { sales: '₹41.2L', profit: '₹6.85L', expenses: '₹2.74L', label: 'Sales this month', growth: '▲ 18% vs last month', sub: 'Invoices: 512 · Paid: ₹33.5L · Due: ₹7.7L' }
+    };
+
+    function switchPeriod(p) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+
+      const d = data[p];
+      document.getElementById('sales-val').textContent = d.sales;
+      document.getElementById('sales-period-label').textContent = d.label;
+      document.getElementById('sales-growth-badge').textContent = d.growth;
+      document.getElementById('sales-sub').textContent = d.sub;
+      document.getElementById('profit-val').textContent = d.profit;
+      document.getElementById('expenses-val').textContent = d.expenses;
+    }
+
+    function remindUser(name, amount) {
+      alert(`WhatsApp reminder triggered for ${name} for outstanding balance ${amount}`);
+    }
+  </script>
+</body>
+
+</html>
