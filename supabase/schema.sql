@@ -42,7 +42,7 @@ alter table public.materials drop column if exists model;
 -- Ensure role check allows admin, owner, employee
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check check (role in ('admin', 'owner', 'employee'));
--- New auth profiles are read-only unless an Admin explicitly promotes them.
+-- New profiles are read-only until an Admin explicitly promotes them.
 alter table public.profiles alter column role set default 'owner';
 
 -- 3. Chart of Accounts Ledgers (Cash, Bank Accounts, Loans, Expenses, Incomes)
