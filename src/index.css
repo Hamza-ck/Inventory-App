@@ -59,8 +59,15 @@ body {
 [class~="bg-slate-950"] {
   background-color: var(--app-canvas) !important;
 }
-[class~="text-slate-100"],
-[class~="text-white"] {
+[class~="text-slate-100"] {
+  color: var(--app-ink) !important;
+}
+
+/* Restore readable page headings without changing white text on action buttons. */
+div[class~="bg-slate-900"] h1,
+div[class~="bg-slate-900"] h2,
+div[class~="bg-slate-900"] h3,
+div[class~="bg-slate-900"] h4 {
   color: var(--app-ink) !important;
 }
 
