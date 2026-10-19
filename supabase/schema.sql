@@ -12,7 +12,7 @@
 -- 1. User Profiles & Roles
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
-  role text not null default 'admin' check (role in ('admin', 'owner', 'employee')),
+  role text not null default 'owner' check (role in ('admin', 'owner', 'employee')),
   full_name text,
   created_at timestamptz default now()
 );
@@ -42,6 +42,8 @@ alter table public.materials drop column if exists model;
 -- Ensure role check allows admin, owner, employee
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check check (role in ('admin', 'owner', 'employee'));
+-- New auth profiles are read-only unless an Admin explicitly promotes them.
+alter table public.profiles alter column role set default 'owner';
 
 -- 3. Chart of Accounts Ledgers (Cash, Bank Accounts, Loans, Expenses, Incomes)
 create table if not exists public.ledgers (

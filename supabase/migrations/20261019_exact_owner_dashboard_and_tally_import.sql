@@ -11,6 +11,9 @@ $$;
 revoke all on function public.is_admin() from public, anon;
 grant execute on function public.is_admin() to authenticated;
 
+-- Fail closed for new profiles: Admin must explicitly promote a user after verification.
+alter table public.profiles alter column role set default 'owner';
+
 alter table public.profiles enable row level security;
 alter table public.materials enable row level security;
 alter table public.ledgers enable row level security;
