@@ -63,20 +63,29 @@ export default function DashboardPage() {
       const [localVouchers, localParties, localMaterials, localLedgers, settings] = await Promise.all([
         accDb.vouchers.toArray(), accDb.parties.toArray(), accDb.materials.toArray(), accDb.ledgers.toArray(), accDb.settings.toArray(),
       ])
-      const shopName = settings.find((item) => item.key === 'shop_name')?.value || 'Your business'
+      let shopName = settings.find((item) => item.key === 'shop_name')?.value || 'Your business'
       setOwnerPrefs((current) => ({ ...current, ...Object.fromEntries(settings.filter((item) => item.key.startsWith('owner_show_')).map((item) => [item.key, item.value !== false])) }))
       const localSnapshot = { vouchers: localVouchers, parties: localParties, materials: localMaterials, ledgers: localLedgers, shopName }
       setData(localSnapshot)
       if (user?.id && user.id !== 'local-demo') {
-        const result = await Promise.all([
-          supabase.from('vouchers').select('*').order('date', { ascending: false }).limit(2000),
-          supabase.from('parties').select('*').limit(2000),
-          supabase.from('materials').select('*').limit(2000),
-          supabase.from('ledgers').select('*').limit(2000),
+        const [result, remoteSettingsResult] = await Promise.all([
+          Promise.all([
+            supabase.from('vouchers').select('*').order('date', { ascending: false }).limit(2000),
+            supabase.from('parties').select('*').limit(2000),
+            supabase.from('materials').select('*').limit(2000),
+            supabase.from('ledgers').select('*').limit(2000),
+          ]),
+          supabase.from('app_settings').select('key,value'),
         ])
         const failed = result.find((response) => response.error)
         if (failed) throw failed.error
-        // Apply the cloud result only when all four reads succeed; this avoids a mixed/partial dashboard refresh.
+        let remoteSettings = {}
+        if (!remoteSettingsResult.error) {
+          remoteSettings = Object.fromEntries((remoteSettingsResult.data || []).map((item) => [item.key, item.value]))
+          shopName = remoteSettings.shop_name || shopName
+          setOwnerPrefs((current) => ({ ...current, ...Object.fromEntries(Object.entries(remoteSettings).filter(([key]) => key.startsWith('owner_show_'))) }))
+        }
+        // Apply cloud records together only when all four accounting reads succeed.
         setData({ vouchers: result[0].data || [], parties: result[1].data || [], materials: result[2].data || [], ledgers: result[3].data || [], shopName })
       }
       setUpdatedAt(new Date())
