@@ -111,7 +111,7 @@ export default function SalesPage() {
             <button
               type="button"
               onClick={() => { setEditingVoucher(null); setIsVoucherModalOpen(true) }}
-              className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-2 transition-all active:scale-95"
+              className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-[#0e7a70] hover:to-[#07675e] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-2 transition-all active:scale-95"
             >
               <PlusCircle className="w-4 h-4" />
               <span>+ New Sales Invoice</span>
@@ -132,7 +132,7 @@ export default function SalesPage() {
               </span>
             </div>
           </div>
-          <div className="shrink-0 bg-blue-900/60 px-3 py-1.5 rounded-lg border border-[#b8ddd0] font-mono text-[#0e7669] font-bold">
+          <div className="shrink-0 bg-[#e7f5ef] px-3 py-1.5 rounded-lg border border-[#b8ddd0] font-mono text-[#0e7669] font-bold">
             {totalUidAccounts} Invoices Linked via UID
           </div>
         </div>
@@ -263,7 +263,7 @@ export default function SalesPage() {
                         </td>
                         <td className="py-3 px-3 text-right font-bold whitespace-nowrap">
                           {hasDue ? (
-                            <span className="text-[#ad5545] bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                            <span className="text-[#ad5545] bg-[#fff5f1] px-2 py-0.5 rounded border border-[#f0d1c7]">
                               ₹{Number(v.due_amount).toLocaleString()}
                             </span>
                           ) : (
@@ -284,7 +284,7 @@ export default function SalesPage() {
                               <button
                                 type="button"
                                 onClick={() => { setEditingVoucher(v); setIsVoucherModalOpen(true) }}
-                                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-[#52685e] hover:text-[#172f2c] transition-colors"
+                                className="p-1.5 rounded-lg bg-[#f4f8f5] hover:bg-[#e8f1eb] text-[#52685e] hover:text-[#172f2c] transition-colors"
                                 title="Modify Invoice (Tally edit)"
                               >
                                 <Edit3 className="w-3.5 h-3.5" />
