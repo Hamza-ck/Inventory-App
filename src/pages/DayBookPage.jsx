@@ -322,7 +322,7 @@ export default function DayBookPage() {
                               <button
                                 type="button"
                                 onClick={() => { setSelectedInvoice(v); setIsInvoiceModalOpen(true) }}
-                                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-[#435b52] transition-colors"
+                                className="p-1.5 rounded-lg bg-[#f4f8f5] hover:bg-[#e8f1eb] text-[#435b52] transition-colors"
                                 title="View & Print Tax Invoice"
                               >
                                 <Eye className="w-3.5 h-3.5" />
@@ -341,7 +341,7 @@ export default function DayBookPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(v.id)}
-                                  className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-[#ad5545] hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-[#fff0eb] hover:bg-[#fae1d8] text-[#ad5545] hover:text-white transition-colors"
                                   title="Cancel / Delete Voucher"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
