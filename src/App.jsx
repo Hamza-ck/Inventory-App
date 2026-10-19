@@ -12,6 +12,8 @@ const MaterialsPage = lazy(() => import('./pages/MaterialsPage'))
 const PartiesPage = lazy(() => import('./pages/PartiesPage'))
 const BankingPage = lazy(() => import('./pages/BankingPage'))
 const TallyIntegrationPage = lazy(() => import('./pages/TallyIntegrationPage'))
+const ExpensesPage = lazy(() => import('./pages/ExpensesPage'))
+const ControlCenterPage = lazy(() => import('./pages/ControlCenterPage'))
 
 export default function App() {
   return (
@@ -85,6 +87,13 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route path="/debtors" element={<ProtectedRoute><PartiesPage /></ProtectedRoute>} />
+            <Route path="/creditors" element={<ProtectedRoute><PartiesPage /></ProtectedRoute>} />
+            <Route path="/expenses" element={<ProtectedRoute><ExpensesPage /></ProtectedRoute>} />
+            <Route path="/imports" element={<ProtectedRoute><TallyIntegrationPage /></ProtectedRoute>} />
+            <Route path="/users" element={<ProtectedRoute><ControlCenterPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><ControlCenterPage /></ProtectedRoute>} />
+            <Route path="/activity" element={<ProtectedRoute><ControlCenterPage /></ProtectedRoute>} />
             <Route
               path="/tally"
               element={
