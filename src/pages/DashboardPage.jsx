@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [updatedAt, setUpdatedAt] = useState(null)
+  const [ownerPrefs, setOwnerPrefs] = useState({ owner_show_sales: true, owner_show_profit: true, owner_show_expenses: true, owner_show_debtors: true, owner_show_creditors: true, owner_show_inventory: true, owner_show_loans: false })
 
   async function refresh() {
     setRefreshing(true)
@@ -63,6 +64,7 @@ export default function DashboardPage() {
         accDb.vouchers.toArray(), accDb.parties.toArray(), accDb.materials.toArray(), accDb.ledgers.toArray(), accDb.settings.toArray(),
       ])
       const shopName = settings.find((item) => item.key === 'shop_name')?.value || 'Your business'
+      setOwnerPrefs((current) => ({ ...current, ...Object.fromEntries(settings.filter((item) => item.key.startsWith('owner_show_')).map((item) => [item.key, item.value !== false])) }))
       const localSnapshot = { vouchers: localVouchers, parties: localParties, materials: localMaterials, ledgers: localLedgers, shopName }
       setData(localSnapshot)
       if (user?.id && user.id !== 'local-demo') {
@@ -169,18 +171,18 @@ export default function DashboardPage() {
         {errorMessage && <div className="mb-4 flex items-center gap-2 rounded-xl border border-[#f2dcba] bg-[#fff7e9] px-4 py-3 text-xs text-[#87561d]"><CircleAlert size={16} />{errorMessage}</div>}
 
         <section className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-          <article className="relative col-span-2 flex min-h-[166px] flex-col justify-between overflow-hidden rounded-[20px] bg-gradient-to-br from-[#10877c] to-[#087268] p-5 text-white shadow-lg shadow-[#0b766b]/10">
+          {(isAdmin || ownerPrefs.owner_show_sales !== false) && <article className="relative col-span-2 flex min-h-[166px] flex-col justify-between overflow-hidden rounded-[20px] bg-gradient-to-br from-[#10877c] to-[#087268] p-5 text-white shadow-lg shadow-[#0b766b]/10">
             <div className="relative z-10 flex items-center justify-between text-[13px] font-bold text-[#dcf5ef]"><span>Sales {period === 'Today' ? 'today' : period === 'Week' ? 'this week' : 'this month'}</span><span className="grid h-9 w-9 place-items-center rounded-xl bg-white/15"><Activity size={20} /></span></div>
             <strong className="relative z-10 text-[36px] font-extrabold tracking-tight sm:text-[42px]">{money(salesTotal)}</strong>
             <div className="relative z-10 flex flex-wrap items-center justify-between gap-2 text-[10px] text-[#d6eee9]"><span>{sales.length} sales invoices in this period</span><span className="inline-flex items-center gap-1 rounded-full bg-[#effaf6] px-2.5 py-1 font-extrabold text-[#0f7569]"><ArrowUpRight size={13} /> Live books</span></div>
             <div className="pointer-events-none absolute -bottom-24 -right-10 h-52 w-52 rounded-full border-[25px] border-white/5 shadow-[0_0_0_20px_rgba(255,255,255,0.03),0_0_0_40px_rgba(255,255,255,0.02)]" />
-          </article>
-          <MetricCard label="Profit" value={money(netProfit)} detail="Estimated from recorded sales and expenses" icon={ArrowUpRight} tone="bg-[#e5f6ee] text-[#0a7a61]" />
-          <MetricCard label="Expenses" value={money(expenses)} detail="Recorded payment vouchers" icon={ReceiptText} tone="bg-[#fff0df] text-[#b45b10]" to="/daybook" />
-          <MetricCard label="Debtors" value={money(debtorTotal)} detail={'They owe you · ' + debtors.length + ' parties'} icon={Users} tone="bg-[#e3f4ef] text-[#0c7c72]" to="/parties" />
-          <MetricCard label="Creditors" value={money(creditorTotal)} detail={'You owe · ' + creditors.length + ' suppliers'} icon={Landmark} tone="bg-[#fff0e2] text-[#ba5e18]" to="/parties" />
-          <MetricCard label="Inventory" value={money(inventoryValue)} detail={data.materials.length + ' stock items · cost value'} icon={Boxes} tone="bg-[#ebf0f3] text-[#334d63]" to="/materials" />
-          <MetricCard label="Loans & advances" value={money(loansOwed - advancesGiven)} detail="Net liability" icon={Landmark} tone="bg-[#eff1f7] text-[#4d5b73]" to="/banking" />
+          </article>}
+          {(isAdmin || ownerPrefs.owner_show_profit !== false) && <MetricCard label="Profit" value={money(netProfit)} detail="Estimated from recorded sales and expenses" icon={ArrowUpRight} tone="bg-[#e5f6ee] text-[#0a7a61]" />}
+          {(isAdmin || ownerPrefs.owner_show_expenses !== false) && <MetricCard label="Expenses" value={money(expenses)} detail="Recorded payment vouchers" icon={ReceiptText} tone="bg-[#fff0df] text-[#b45b10]" to="/expenses" />}
+          {(isAdmin || ownerPrefs.owner_show_debtors !== false) && <MetricCard label="Debtors" value={money(debtorTotal)} detail={'They owe you · ' + debtors.length + ' parties'} icon={Users} tone="bg-[#e3f4ef] text-[#0c7c72]" to="/debtors" />}
+          {(isAdmin || ownerPrefs.owner_show_creditors !== false) && <MetricCard label="Creditors" value={money(creditorTotal)} detail={'You owe · ' + creditors.length + ' suppliers'} icon={Landmark} tone="bg-[#fff0e2] text-[#ba5e18]" to="/creditors" />}
+          {(isAdmin || ownerPrefs.owner_show_inventory !== false) && <MetricCard label="Inventory" value={money(inventoryValue)} detail={data.materials.length + ' stock items · cost value'} icon={Boxes} tone="bg-[#ebf0f3] text-[#334d63]" to="/materials" />}
+          {(isAdmin || ownerPrefs.owner_show_loans !== false) && <MetricCard label="Loans & advances" value={money(loansOwed - advancesGiven)} detail="Net liability" icon={Landmark} tone="bg-[#eff1f7] text-[#4d5b73]" to="/banking" />}
         </section>
 
         <section className="mb-4 grid gap-4 xl:grid-cols-[1.55fr_1fr]">
@@ -201,7 +203,7 @@ export default function DashboardPage() {
           </article>
 
           <article className="min-w-0 rounded-[18px] border border-[#e1e8e3] bg-white p-4 sm:p-5">
-            <div className="flex items-start justify-between gap-3"><div><h2 className="text-[15px] font-extrabold">Money to collect</h2><p className="mt-1 text-[11px] text-[#82908a]">Customers with outstanding dues</p></div><Link to="/parties" className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-extrabold text-[#0d786d] no-underline">All debtors <ArrowRight size={14} /></Link></div>
+            <div className="flex items-start justify-between gap-3"><div><h2 className="text-[15px] font-extrabold">Money to collect</h2><p className="mt-1 text-[11px] text-[#82908a]">Customers with outstanding dues</p></div><Link to="/debtors" className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-extrabold text-[#0d786d] no-underline">All debtors <ArrowRight size={14} /></Link></div>
             <div className="mt-3 divide-y divide-[#edf1ee]">
               {receivables.length ? receivables.map((party) => {
                 const phone = String(party.phone || '').replace(/\D/g, '')
