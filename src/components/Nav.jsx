@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
   Activity, Banknote, BookOpen, Boxes, Building2, ChevronDown, CircleUserRound,
   FileSpreadsheet, LayoutDashboard, LogOut, Menu, PlusCircle, ReceiptText,
@@ -31,6 +31,8 @@ export default function Nav() {
   const [voucherOpen, setVoucherOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const location = useLocation()
+  const controlMobile = isAdmin && ['/tally', '/imports', '/users', '/settings', '/activity'].includes(location.pathname)
   const mobileItems = overviewItems.filter((item) => ['/', '/debtors', '/sales', '/materials'].includes(item.to))
   const linkClass = ({ isActive }) =>
     'group flex min-h-[42px] items-center gap-3 rounded-xl px-3 text-[13px] font-semibold no-underline transition-colors ' +
@@ -55,7 +57,7 @@ export default function Nav() {
       <nav className="grid gap-1" aria-label="Main navigation">
         {overviewItems.map((item) => {
           const Icon = item.icon
-          return <NavLink key={item.to} to={item.to} end={item.end || false} className={linkClass}><Icon size={18} /><span>{item.label}</span></NavLink>
+          return <NavLink key={item.to} to={item.to} end={item.end || false} className={({ isActive }) => linkClass({ isActive: isActive || (item.to === '/debtors' && location.pathname === '/parties') })}><Icon size={18} /><span>{item.label}</span></NavLink>
         })}
       </nav>
 
@@ -99,12 +101,18 @@ export default function Nav() {
     </div>}
 
     <nav className="fixed inset-x-3 bottom-[max(10px,env(safe-area-inset-bottom))] z-40 flex items-center justify-around gap-1 rounded-[25px] border border-white/90 bg-white/95 p-1.5 shadow-[0_8px_32px_rgba(21,58,45,0.13)] backdrop-blur-xl lg:hidden" aria-label="Mobile navigation">
-      {mobileItems.map((item) => {
-        const Icon = item.icon
-        const label = item.to === '/' ? 'Home' : item.to === '/debtors' ? 'Debtors' : item.to === '/sales' ? 'Sales' : 'Stock'
-        return <NavLink key={item.to} to={item.to} end={item.end || false} className={mobileLinkClass}><Icon size={20} /><span>{label}</span></NavLink>
-      })}
-      <button type="button" className={'flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[9px] font-bold transition-colors ' + (moreOpen ? 'bg-[#dceddf] text-[#0c756a]' : 'text-[#526860]')} onClick={() => setMoreOpen((value) => !value)}><ChevronDown size={20} /><span>More</span></button>
+      {controlMobile ? <>
+        <NavLink to="/tally" className={({ isActive }) => mobileLinkClass({ isActive: isActive || location.pathname === '/imports' })}><FileSpreadsheet size={20} /><span>Imports</span></NavLink>
+        <NavLink to="/activity" className={mobileLinkClass}><Activity size={20} /><span>Alerts</span></NavLink>
+        <NavLink to="/settings" className={({ isActive }) => mobileLinkClass({ isActive: isActive || location.pathname === '/users' })}><CircleUserRound size={20} /><span>Account</span></NavLink>
+      </> : <>
+        {mobileItems.map((item) => {
+          const Icon = item.icon
+          const label = item.to === '/' ? 'Home' : item.to === '/debtors' ? 'Debtors' : item.to === '/sales' ? 'Sales' : 'Stock'
+          return <NavLink key={item.to} to={item.to} end={item.end || false} className={({ isActive }) => mobileLinkClass({ isActive: isActive || (item.to === '/debtors' && location.pathname === '/parties') })}><Icon size={20} /><span>{label}</span></NavLink>
+        })}
+        <button type="button" className={'flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[9px] font-bold transition-colors ' + (moreOpen ? 'bg-[#dceddf] text-[#0c756a]' : 'text-[#526860]')} onClick={() => setMoreOpen((value) => !value)}><ChevronDown size={20} /><span>More</span></button>
+      </>}
     </nav>
 
     {moreOpen && <div className="fixed bottom-[82px] right-5 z-50 flex w-[205px] flex-col rounded-2xl border border-[#e1e9e4] bg-white p-2 shadow-xl lg:hidden">
