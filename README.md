@@ -118,3 +118,23 @@ from the deployed URL immediately.
 - CSV export from the dashboard for accounting/reporting
 - Multiple locations/warehouses per material
 - Push notifications on low stock
+
+## Exact Accounting PWA — development branch
+
+The dashboard UI now follows the supplied Owner Dashboard reference: a responsive teal navigation shell, sales/profit/expense cards, debtor and creditor totals, inventory and loans, a seven-day sales chart, recent invoices, and stock alerts.
+
+**Permissions:** Admin is the only write-capable app role. Owners (and unknown/non-admin roles) are view-only. A role switcher has been removed; role assignment must be performed by an authorized operator in Supabase. The SQL policies are the actual security boundary, not hidden buttons.
+
+**Tally import:** The new Edge Function stages XML, Excel and CSV rows for preview. The database only changes after an Admin commits the staged job; commit uses one PostgreSQL transaction. Voucher source hashes/GUIDs are used to make retries idempotent. Tally export layouts vary, so test representative company exports before relying on imported totals.
+
+### Deploy the migration and import function
+
+\`\`\`bash
+supabase db push
+supabase functions deploy tally-import
+supabase secrets set SUPABASE_ANON_KEY=<your-project-anon-key>
+\`\`\`
+
+For a new database, run the updated \`supabase/schema.sql\` in the Supabase SQL Editor. Set \`VITE_SUPABASE_URL\` and \`VITE_SUPABASE_ANON_KEY\` in Vercel. Never use a service-role key in a \`VITE_*\` variable or browser code.
+
+For local UI testing without a Supabase project, set \`VITE_DEMO_MODE=true\` in a local \`.env\` while running \`npm run dev\`. This only works on Vite development builds without Supabase credentials; add \`?demo=owner\` to preview read-only navigation. Do not enable demo mode for production.

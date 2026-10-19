@@ -1,158 +1,48 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { Mail, Lock, Eye, EyeOff, Building2, LogIn, AlertCircle, ShieldCheck, ShieldAlert, Sparkles } from 'lucide-react'
-import { supabase } from '../lib/supabaseClient'
+import { Building2, CircleAlert, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
+import { supabase, supabaseConfigured } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-  const { setRole } = useAuth()
+  const { isDemo } = useAuth()
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    setError(null)
-    setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
-    if (error) {
-      setError(error.message)
-    } else {
-      navigate('/')
+  async function handleSubmit(event) {
+    event.preventDefault()
+    setError('')
+    if (!supabaseConfigured) {
+      setError('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY before signing in.')
+      return
     }
+    setLoading(true)
+    const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+    setLoading(false)
+    if (authError) setError(authError.message)
+    else navigate('/')
   }
 
-  function handleDemoLogin(selectedRole) {
-    setRole(selectedRole)
-    navigate('/')
-  }
-
-  return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-      {/* Ambient background glows */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
-
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="w-full max-w-md bg-slate-900 rounded-3xl p-7 sm:p-9 shadow-2xl border border-slate-800 z-10"
-      >
-        {/* Brand Header */}
-        <div className="text-center mb-7">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-teal-500 flex items-center justify-center text-white mx-auto mb-3.5 shadow-lg shadow-blue-600/30">
-            <Building2 className="w-7 h-7" />
-          </div>
-          <h1 className="text-2xl font-black text-white tracking-tight">TallyFlow SaaS</h1>
-          <p className="text-xs text-slate-400 mt-1">Complete Accounting Solutions &amp; Tally Engine</p>
-        </div>
-
-        {/* Demo Fast Access Buttons */}
-        <div className="mb-6 p-3.5 bg-slate-800/80 rounded-2xl border border-slate-700 space-y-2">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-300">
-            <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-            <span>Instant Demo Access (No password needed)</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleDemoLogin('admin')}
-              className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-1.5"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Admin (Full Entry)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDemoLogin('owner')}
-              className="py-2.5 px-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-amber-300 font-bold text-xs border border-amber-500/30 transition-colors flex items-center justify-center gap-1.5"
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-              <span>Owner (Track Only)</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="relative flex py-2 items-center mb-4">
-          <div className="flex-grow border-t border-slate-800"></div>
-          <span className="flex-shrink mx-3 text-slate-500 text-[11px] uppercase font-semibold">Or Sign In with Email</span>
-          <div className="flex-grow border-t border-slate-800"></div>
-        </div>
-
-        {/* Login Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-300 mb-1.5">Work Email</label>
-            <div className="relative">
-              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="email"
-                placeholder="admin@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-                className="w-full pl-10 pr-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-sm font-medium text-white placeholder:text-slate-500 focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-300 mb-1.5">Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                className="w-full pl-10 pr-10 py-3 bg-slate-800 border border-slate-700 rounded-xl text-sm font-medium text-white placeholder:text-slate-500 focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1"
-                title={showPassword ? 'Hide Password' : 'Show Password'}
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          {error && (
-            <div className="p-3 bg-rose-950/70 border border-rose-800 text-rose-300 rounded-xl text-xs font-medium flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-600/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
-          >
-            {loading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Signing in...</span>
-              </>
-            ) : (
-              <>
-                <LogIn className="w-4 h-4" />
-                <span>Sign In to Accounting</span>
-              </>
-            )}
-          </button>
-        </form>
-      </motion.div>
-    </div>
-  )
+  return <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top_left,#e2f3ec,transparent_40%),#f4f7f4] p-5">
+    <section className="w-full max-w-[420px] rounded-3xl border border-[#e1e9e3] bg-white p-7 shadow-[0_24px_70px_rgba(24,73,52,0.07)] sm:p-8">
+      <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-[17px] bg-[#e2f5ed] text-[#0b786e]"><Building2 size={25} /></div>
+      <h1 className="text-center text-[26px] font-extrabold tracking-tight">TallyFlow</h1>
+      <p className="mt-1 text-center text-xs text-[#77867f]">Accounting books, wherever you work.</p>
+      <div className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-[#f0f7f2] px-3 py-3 text-[11px] font-semibold text-[#3f6a5c]"><ShieldCheck size={17} />Secure access · Admin and Owner roles</div>
+      {isDemo && <div className="mt-3 rounded-xl bg-[#eef7f2] p-3 text-[11px] leading-relaxed text-[#39705e]">Local demo mode is active. Add <code>?demo=owner</code> to the URL to preview the read-only Owner dashboard.</div>}
+      {error && <div className="mt-4 flex items-center gap-2 rounded-xl bg-[#fff0ee] p-3 text-[11px] text-[#a53c32]"><CircleAlert size={16} />{error}</div>}
+      <form onSubmit={handleSubmit} className="mt-5 grid gap-2">
+        <label htmlFor="login-email" className="mt-2 text-[11px] font-bold text-[#425e54]">Email address</label>
+        <div className="flex min-h-11 items-center gap-2 rounded-xl border border-[#dce6df] px-3 text-[#819189] focus-within:border-[#6bb5a5]"><Mail size={17} /><input id="login-email" type="email" autoComplete="username" className="w-full bg-transparent py-2 text-[13px] text-[#19332c] outline-none" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@business.com" required /></div>
+        <label htmlFor="login-password" className="mt-2 text-[11px] font-bold text-[#425e54]">Password</label>
+        <div className="flex min-h-11 items-center gap-2 rounded-xl border border-[#dce6df] px-3 text-[#819189] focus-within:border-[#6bb5a5]"><LockKeyhole size={17} /><input id="login-password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" className="w-full min-w-0 bg-transparent py-2 text-[13px] text-[#19332c] outline-none" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" required /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} className="p-1 text-[#73827c]" onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div>
+        <button type="submit" disabled={loading} className="mt-3 min-h-11 rounded-xl bg-[#0d7c71] px-4 py-3 text-xs font-extrabold text-white hover:bg-[#086c63] disabled:opacity-50">{loading ? 'Signing in…' : 'Sign in'}</button>
+      </form>
+      <p className="mt-5 text-center text-[10px] leading-relaxed text-[#88948e]">Access is managed by your Admin. Owner accounts can view and track only.</p>
+    </section>
+  </main>
 }
