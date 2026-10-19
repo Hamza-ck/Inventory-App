@@ -156,7 +156,7 @@ export default function BankingPage() {
               <button
                 type="button"
                 onClick={() => setIsContraModalOpen(true)}
-                className="px-4 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-teal-600/30 flex items-center gap-1.5 transition-all active:scale-95"
+                className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-[#086c63] hover:to-[#075b53] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-1.5 transition-all active:scale-95"
               >
                 <ArrowRightLeft className="w-4 h-4" />
                 <span>Contra Transfer (F4)</span>
@@ -403,7 +403,7 @@ export default function BankingPage() {
                 <button
                   type="submit"
                   disabled={contraPosting}
-                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold shadow-md shadow-teal-600/30 flex items-center gap-1.5"
+                  className="px-5 py-2 rounded-xl bg-[#0e7a70] hover:bg-[#086c63] text-white text-xs font-bold shadow-md shadow-[#0e7a70]/15 flex items-center gap-1.5"
                 >
                   {contraPosting ? 'Posting...' : 'Execute Contra Transfer'}
                 </button>
