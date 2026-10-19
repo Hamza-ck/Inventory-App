@@ -153,7 +153,7 @@ export default function DayBookPage() {
               <button
                 type="button"
                 onClick={() => { setEditingVoucher(null); setIsVoucherModalOpen(true) }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/30 flex items-center gap-1.5 transition-all"
+                className="px-4 py-2 bg-[#0e7a70] hover:bg-[#086c63] text-white rounded-xl text-xs font-bold shadow-md shadow-[#0e7a70]/15 flex items-center gap-1.5 transition-all"
               >
                 <PlusCircle className="w-4 h-4" />
                 <span>+ New Voucher</span>
@@ -173,7 +173,7 @@ export default function DayBookPage() {
                 placeholder="Search voucher, party, UID, narration..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
               />
             </div>
 
@@ -182,7 +182,7 @@ export default function DayBookPage() {
               <select
                 value={voucherTypeFilter}
                 onChange={(e) => setVoucherTypeFilter(e.target.value)}
-                className="w-full px-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
               >
                 <option value="all">All Voucher Types (F8, F9, F6, F5, F4, F7)</option>
                 <option value="sales">Sales (F8)</option>
@@ -199,7 +199,7 @@ export default function DayBookPage() {
               <select
                 value={dateRange}
                 onChange={(e) => setDateRange(e.target.value)}
-                className="w-full px-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-semibold text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
               >
                 <option value="all">All Dates</option>
                 <option value="today">Today</option>
@@ -324,7 +324,7 @@ export default function DayBookPage() {
                                 <button
                                   type="button"
                                   onClick={() => { setEditingVoucher(v); setIsVoucherModalOpen(true) }}
-                                  className="p-1.5 rounded-lg bg-blue-600/30 hover:bg-blue-600 text-[#0e7669] hover:text-white transition-colors"
+                                  className="p-1.5 rounded-lg bg-[#0e7a70]/30 hover:bg-[#0e7a70] text-[#0e7669] hover:text-white transition-colors"
                                   title="Modify Voucher (Tally edit)"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
