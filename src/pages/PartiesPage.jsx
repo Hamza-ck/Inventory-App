@@ -227,7 +227,7 @@ export default function PartiesPage() {
             <button
               type="button"
               onClick={openCreateParty}
-              className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-2 transition-all active:scale-95"
+              className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-[#0e7a70] hover:to-[#07675e] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-2 transition-all active:scale-95"
             >
               <Plus className="w-4 h-4" />
               <span>+ Add {activeTab === 'debtor' ? 'Customer' : 'Supplier'}</span>
@@ -241,7 +241,7 @@ export default function PartiesPage() {
             onClick={() => setActiveTab('debtor')}
             className={`p-5 rounded-2xl border transition-all cursor-pointer ${
               activeTab === 'debtor'
-                ? 'bg-[#e7f5ef] border-[#b8ddd0] shadow-lg shadow-blue-500/10'
+                ? 'bg-[#e7f5ef] border-[#b8ddd0] shadow-lg shadow-[#0e7a70]/10'
                 : 'bg-white border-[#e1e8e3] hover:border-[#d3e1d8]'
             }`}
           >
@@ -266,7 +266,7 @@ export default function PartiesPage() {
             onClick={() => setActiveTab('creditor')}
             className={`p-5 rounded-2xl border transition-all cursor-pointer ${
               activeTab === 'creditor'
-                ? 'bg-[#fff3ef] border-rose-500 shadow-lg shadow-rose-500/10'
+                ? 'bg-[#fff3ef] border-[#efc9be] shadow-lg shadow-[#b45b10]/10'
                 : 'bg-white border-[#e1e8e3] hover:border-[#d3e1d8]'
             }`}
           >
@@ -368,7 +368,7 @@ export default function PartiesPage() {
                     <button
                       type="button"
                       onClick={() => { setStatementParty(party); setIsStatementOpen(true) }}
-                      className="px-3 py-1.5 rounded-xl bg-slate-700/70 hover:bg-[#edf5f0] text-[#435b52] text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      className="px-3 py-1.5 rounded-xl bg-[#f4f8f5] hover:bg-[#edf5f0] text-[#435b52] text-xs font-semibold flex items-center gap-1.5 transition-colors"
                       title="View bill-by-bill ledger statement"
                     >
                       <History className="w-3.5 h-3.5 text-[#0e7a70]" />
@@ -384,8 +384,8 @@ export default function PartiesPage() {
                               onClick={() => openQuickSettle(party)}
                               className={`px-3 py-1.5 rounded-xl text-white text-xs font-bold transition-all ${
                                 party.type === 'debtor'
-                                  ? 'bg-teal-600 hover:bg-teal-500 shadow-xs shadow-teal-600/30'
-                                  : 'bg-rose-600 hover:bg-rose-500 shadow-xs shadow-rose-600/30'
+                                  ? 'bg-[#0e7a70] hover:bg-[#086c63] shadow-xs shadow-[#0e7a70]/15'
+                                  : 'bg-rose-600 hover:bg-rose-500 shadow-xs shadow-[#b45b10]/15'
                               }`}
                             >
                               {party.type === 'debtor' ? 'Receive (F6)' : 'Pay (F5)'}
@@ -394,7 +394,7 @@ export default function PartiesPage() {
                           <button
                             type="button"
                             onClick={() => openEditParty(party)}
-                            className="p-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-[#52685e] transition-colors"
+                            className="p-1.5 rounded-xl bg-[#f4f8f5] hover:bg-[#e8f1eb] text-[#52685e] transition-colors"
                             title="Edit Party Details"
                           >
                             <FileText className="w-3.5 h-3.5" />
@@ -546,7 +546,7 @@ export default function PartiesPage() {
 
             <form onSubmit={handleQuickSettleSubmit} className="space-y-4 pt-4">
               {quickSettleParty.uid && (
-                <div className="p-3 bg-blue-950/50 border border-[#c6e5d9] rounded-xl flex items-center gap-2 text-xs">
+                <div className="p-3 bg-[#e7f5ef] border border-[#c6e5d9] rounded-xl flex items-center gap-2 text-xs">
                   <ShieldCheck className="w-4 h-4 text-[#0e7a70] shrink-0" />
                   <span>Circulating through Permanent UID: <strong>{quickSettleParty.uid}</strong></span>
                 </div>
@@ -602,7 +602,7 @@ export default function PartiesPage() {
                 <button
                   type="submit"
                   disabled={settling}
-                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold shadow-md shadow-teal-600/30 flex items-center gap-1.5"
+                  className="px-5 py-2 rounded-xl bg-[#0e7a70] hover:bg-[#086c63] text-white text-xs font-bold shadow-md shadow-[#0e7a70]/15 flex items-center gap-1.5"
                 >
                   {settling ? 'Processing...' : 'Post Settlement'}
                 </button>
@@ -614,7 +614,7 @@ export default function PartiesPage() {
 
       {/* Bill-by-bill Party Statement Modal */}
       {isStatementOpen && statementParty && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-[#102b25]/80 backdrop-blur-xs">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -649,7 +649,7 @@ export default function PartiesPage() {
                     <th className="py-2.5 px-3 text-right">Credit (₹)</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800 font-medium">
+                <tbody className="divide-y divide-[#e8eee9] font-medium">
                   {statementVouchers.length > 0 ? (
                     statementVouchers.map((v) => {
                       const isDebit = v.voucher_type === 'sales'
