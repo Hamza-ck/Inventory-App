@@ -34,9 +34,7 @@ export default function Nav() {
   const mobileItems = overviewItems.filter((item) => ['/', '/debtors', '/sales', '/materials'].includes(item.to))
   const linkClass = ({ isActive }) =>
     'group flex min-h-[42px] items-center gap-3 rounded-xl px-3 text-[13px] font-semibold no-underline transition-colors ' +
-    isActive
-      ? 'bg-[#e0f2e9] text-[#087367]'
-      : 'text-[#c8ded7] hover:bg-white/10 hover:text-white')
+    (isActive ? 'bg-[#e0f2e9] text-[#087367]' : 'text-[#c8ded7] hover:bg-white/10 hover:text-white')
   const mobileLinkClass = ({ isActive }) =>
     'flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[9px] font-bold no-underline transition-colors ' +
     (isActive ? 'bg-[#dceddf] text-[#0c756a]' : 'text-[#526860]')
