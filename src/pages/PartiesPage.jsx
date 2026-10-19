@@ -227,7 +227,7 @@ export default function PartiesPage() {
             <button
               type="button"
               onClick={openCreateParty}
-              className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition-all active:scale-95"
+              className="px-4 py-2 bg-gradient-to-r from-[#0e7a70] to-[#07675e] hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-[#0e7a70]/15 flex items-center gap-2 transition-all active:scale-95"
             >
               <Plus className="w-4 h-4" />
               <span>+ Add {activeTab === 'debtor' ? 'Customer' : 'Supplier'}</span>
@@ -241,7 +241,7 @@ export default function PartiesPage() {
             onClick={() => setActiveTab('debtor')}
             className={`p-5 rounded-2xl border transition-all cursor-pointer ${
               activeTab === 'debtor'
-                ? 'bg-[#e7f5ef] border-blue-500 shadow-lg shadow-blue-500/10'
+                ? 'bg-[#e7f5ef] border-[#b8ddd0] shadow-lg shadow-blue-500/10'
                 : 'bg-white border-[#e1e8e3] hover:border-[#d3e1d8]'
             }`}
           >
@@ -297,7 +297,7 @@ export default function PartiesPage() {
               placeholder={`Search ${activeTab === 'debtor' ? 'customer name, UID, phone...' : 'supplier name, phone...'}`}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-9 pr-3 py-1.5 bg-[#f4f7f4] border border-[#e1e8e3] rounded-xl text-xs font-medium text-[#172f2c] placeholder:text-[#8a9991] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
             />
           </div>
 
@@ -440,7 +440,7 @@ export default function PartiesPage() {
                   value={partyForm.name}
                   onChange={(e) => setPartyForm({ ...partyForm, name: e.target.value })}
                   placeholder="e.g. Apex Infotech Pvt Ltd"
-                  className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 bg-white border border-[#e1e8e3] rounded-xl text-xs text-[#172f2c] focus:outline-none focus:ring-2 focus:ring-[#0e7a70]"
                 />
               </div>
 
@@ -512,7 +512,7 @@ export default function PartiesPage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-600/30"
+                  className="px-5 py-2 rounded-xl bg-[#0e7a70] hover:bg-[#086c63] text-white text-xs font-bold shadow-md shadow-[#0e7a70]/15"
                 >
                   {editingParty ? 'Save Changes' : 'Create Party Master'}
                 </button>
