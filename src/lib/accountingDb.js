@@ -1,24 +1,25 @@
 import Dexie from 'dexie'
-import { supabase } from './supabaseClient'
 
 /**
- * Tally SaaS Accounting Database (Dexie + Supabase Hybrid)
+ * Tally SaaS Accounting Database (Dexie IndexedDB Engine)
  * Handles:
  * - Pure Material-wise Inventory
  * - Full Voucher Management (Sales, Purchase, Payment, Receipt, Contra, Journal)
  * - Tally Modification Engine (Editable vouchers with balance recomputation)
  * - Permanent UID generator and circulation for Debtors with closing dues
  * - Chart of Accounts (Cash, Bank, Loans, Debtors, Creditors, Expenses, Incomes)
+ * - App Settings & Owner Visibility Controls
  */
 
 export const accDb = new Dexie('TallySaasAccounting')
 
-accDb.version(1).stores({
+accDb.version(2).stores({
   vouchers: '++id, voucher_no, voucher_type, date, party_id, party_name, party_uid, amount, due_amount, createdAt',
   materials: '++id, sku, name, category, unit, current_qty, purchase_rate, sales_rate, reorder_threshold',
-  parties: '++id, name, type, uid, phone, current_balance',
-  ledgers: '++id, name, group, current_balance',
+  parties: '++id, name, type, uid, phone, current_balance, age_bucket, next_payment, due_days',
+  ledgers: '++id, name, group, current_balance, category',
   settings: 'key, value',
+  imports: '++id, filename, date, added_count, skipped_count, status, problems_count',
 })
 
 // Generate Next Debtor Permanent UID: UID-CUST-1001, UID-CUST-1002, etc.
@@ -39,9 +40,7 @@ export async function generateNextDebtorUid() {
 
 /**
  * Resolve or Assign Customer Permanent UID:
- * Internal logic requirement:
- * i) Every new invoice if have an closing due balance gets UID else just add into sales.
- * ii) UID connect with that name holder permanently and circulated future transactions through UID
+ * Every invoice with a closing due balance gets UID permanently circulated.
  */
 export async function resolvePartyUidOnSale(partyName, dueAmount, phone = '') {
   if (!partyName || !partyName.trim()) {
@@ -51,7 +50,6 @@ export async function resolvePartyUidOnSale(partyName, dueAmount, phone = '') {
   const cleanName = partyName.trim()
   const isCash = cleanName.toLowerCase() === 'cash' || cleanName.toLowerCase() === 'counter cash'
 
-  // Look for existing party with this name
   const allParties = await accDb.parties.toArray()
   let party = allParties.find(
     (p) => p.name.trim().toLowerCase() === cleanName.toLowerCase() && p.type === 'debtor'
@@ -60,34 +58,24 @@ export async function resolvePartyUidOnSale(partyName, dueAmount, phone = '') {
   const hasDue = Number(dueAmount) > 0
 
   if (party) {
-    // If party exists and already has a UID, retain and circulate it permanently
     if (party.uid) {
       return { party, uid: party.uid }
     }
-
-    // Party exists but had no UID previously:
-    // If this invoice has closing due balance, assign permanent UID now!
     if (hasDue) {
       const newUid = await generateNextDebtorUid()
       await accDb.parties.update(party.id, { uid: newUid })
       party.uid = newUid
       return { party, uid: newUid }
     }
-
-    // No due balance and no previous UID -> just return without UID
     return { party, uid: null }
   }
 
-  // Party does NOT exist yet:
   if (isCash && !hasDue) {
-    // Pure cash customer with 0 due balance -> no UID, just sales
     return { party: null, uid: null }
   }
 
-  // Create new customer party
   let assignedUid = null
   if (hasDue) {
-    // Has closing due balance -> gets UID permanently
     assignedUid = await generateNextDebtorUid()
   }
 
@@ -100,6 +88,7 @@ export async function resolvePartyUidOnSale(partyName, dueAmount, phone = '') {
     address: '',
     opening_balance: 0,
     current_balance: Number(dueAmount) || 0,
+    age_bucket: '0–30d',
     created_at: new Date().toISOString(),
   })
 
@@ -116,7 +105,7 @@ async function applyVoucherEffects(voucher, isReversal = false) {
   const paidAmount = Number(voucher.paid_amount) || 0
   const dueAmount = Number(voucher.due_amount) || 0
 
-  // 1. Inventory Movements (Sales decreases stock, Purchase increases stock)
+  // 1. Inventory Movements
   if (Array.isArray(voucher.items) && voucher.items.length > 0) {
     for (const item of voucher.items) {
       const itemQty = Number(item.qty) || 0
@@ -132,488 +121,516 @@ async function applyVoucherEffects(voucher, isReversal = false) {
       }
 
       if (material) {
-        let delta = 0
+        let qtyChange = 0
         if (voucher.voucher_type === 'sales') {
-          delta = -itemQty * multiplier // Sales reduces inventory
+          qtyChange = -itemQty * multiplier
         } else if (voucher.voucher_type === 'purchase') {
-          delta = itemQty * multiplier // Purchase increases inventory
+          qtyChange = itemQty * multiplier
         }
 
-        const newQty = Math.max(0, (Number(material.current_qty) || 0) + delta)
+        const newQty = Math.max(0, (Number(material.current_qty) || 0) + qtyChange)
         await accDb.materials.update(material.id, { current_qty: newQty })
-
-        // Also sync to Supabase if connected
-        try {
-          await supabase.from('materials').update({ current_qty: newQty }).eq('sku', material.sku)
-        } catch {
-          // offline safe
-        }
       }
     }
   }
 
-  // 2. Party Balance Updates
-  if (voucher.party_id || voucher.party_uid || voucher.party_name) {
+  // 2. Party Balances
+  if (voucher.party_name && voucher.party_name.trim().toLowerCase() !== 'cash') {
     let party = null
     if (voucher.party_id) {
       party = await accDb.parties.get(voucher.party_id)
-    } else if (voucher.party_uid) {
-      party = await accDb.parties.where('uid').equals(voucher.party_uid).first()
-    } else if (voucher.party_name) {
-      party = await accDb.parties.where('name').equalsIgnoreCase(voucher.party_name).first()
+    } else {
+      party = await accDb.parties.where('name').equalsIgnoreCase(voucher.party_name.trim()).first()
     }
 
     if (party) {
-      let balanceDelta = 0
-      if (voucher.voucher_type === 'sales') {
-        // Due amount increases customer's balance owed
-        balanceDelta = dueAmount * multiplier
-      } else if (voucher.voucher_type === 'purchase') {
-        // Due amount increases amount owed to creditor
-        balanceDelta = dueAmount * multiplier
-      } else if (voucher.voucher_type === 'receipt') {
-        // Receipt reduces customer's outstanding balance
-        balanceDelta = -amount * multiplier
-      } else if (voucher.voucher_type === 'payment') {
-        // Payment reduces creditor or loan balance
-        balanceDelta = -amount * multiplier
+      let balanceChange = 0
+      if (party.type === 'debtor') {
+        if (voucher.voucher_type === 'sales') {
+          balanceChange = dueAmount * multiplier
+        } else if (voucher.voucher_type === 'receipt') {
+          balanceChange = -amount * multiplier
+        }
+      } else if (party.type === 'creditor') {
+        if (voucher.voucher_type === 'purchase') {
+          balanceChange = dueAmount * multiplier
+        } else if (voucher.voucher_type === 'payment') {
+          balanceChange = -amount * multiplier
+        }
       }
 
-      const newBal = (Number(party.current_balance) || 0) + balanceDelta
-      await accDb.parties.update(party.id, { current_balance: newBal })
+      const newBalance = Math.max(0, (Number(party.current_balance) || 0) + balanceChange)
+      await accDb.parties.update(party.id, { current_balance: newBalance })
     }
   }
 
-  // 3. Cash & Bank Ledger Updates
-  if (voucher.debit_ledger_id || voucher.credit_ledger_id || voucher.payment_mode) {
-    // If sales paid upfront via cash/bank
-    if (voucher.voucher_type === 'sales' && paidAmount > 0) {
-      const mode = (voucher.payment_mode || 'Cash').toLowerCase()
-      const targetGroup = mode.includes('bank') || mode.includes('hdfc') || mode.includes('sbi')
-        ? 'Bank Accounts'
-        : 'Cash-in-hand'
-      const ledger = await accDb.ledgers.where('group').equals(targetGroup).first()
-      if (ledger) {
-        const newBal = (Number(ledger.current_balance) || 0) + paidAmount * multiplier
-        await accDb.ledgers.update(ledger.id, { current_balance: newBal })
-      }
+  // 3. Cash & Bank Ledgers
+  const paymentMode = voucher.payment_mode || 'Cash'
+  const isBank = paymentMode.toLowerCase().includes('bank') || paymentMode.toLowerCase().includes('hdfc') || paymentMode.toLowerCase().includes('neft')
+  const ledgerGroup = isBank ? 'Bank Accounts' : 'Cash-in-hand'
+
+  let targetLedger = await accDb.ledgers.where('group').equals(ledgerGroup).first()
+  if (targetLedger) {
+    let cashChange = 0
+    if (voucher.voucher_type === 'sales') {
+      cashChange = paidAmount * multiplier
+    } else if (voucher.voucher_type === 'purchase') {
+      cashChange = -paidAmount * multiplier
+    } else if (voucher.voucher_type === 'receipt') {
+      cashChange = amount * multiplier
+    } else if (voucher.voucher_type === 'payment') {
+      cashChange = -amount * multiplier
+    } else if (voucher.voucher_type === 'contra') {
+      cashChange = 0
     }
 
-    // Purchase paid via cash/bank
-    if (voucher.voucher_type === 'purchase' && paidAmount > 0) {
-      const mode = (voucher.payment_mode || 'Cash').toLowerCase()
-      const targetGroup = mode.includes('bank') ? 'Bank Accounts' : 'Cash-in-hand'
-      const ledger = await accDb.ledgers.where('group').equals(targetGroup).first()
-      if (ledger) {
-        const newBal = (Number(ledger.current_balance) || 0) - paidAmount * multiplier
-        await accDb.ledgers.update(ledger.id, { current_balance: newBal })
-      }
-    }
-
-    // Receipt (Money came in)
-    if (voucher.voucher_type === 'receipt') {
-      const targetLedgerId = voucher.debit_ledger_id
-      const ledger = targetLedgerId ? await accDb.ledgers.get(targetLedgerId) : await accDb.ledgers.where('group').equals('Bank Accounts').first()
-      if (ledger) {
-        const newBal = (Number(ledger.current_balance) || 0) + amount * multiplier
-        await accDb.ledgers.update(ledger.id, { current_balance: newBal })
-      }
-    }
-
-    // Payment (Money went out)
-    if (voucher.voucher_type === 'payment') {
-      const sourceLedgerId = voucher.credit_ledger_id
-      const ledger = sourceLedgerId ? await accDb.ledgers.get(sourceLedgerId) : await accDb.ledgers.where('group').equals('Cash-in-hand').first()
-      if (ledger) {
-        const newBal = (Number(ledger.current_balance) || 0) - amount * multiplier
-        await accDb.ledgers.update(ledger.id, { current_balance: newBal })
-      }
-    }
-
-    // Contra (Transfer between Cash and Bank)
-    if (voucher.voucher_type === 'contra') {
-      const debitLedger = voucher.debit_ledger_id ? await accDb.ledgers.get(voucher.debit_ledger_id) : null
-      const creditLedger = voucher.credit_ledger_id ? await accDb.ledgers.get(voucher.credit_ledger_id) : null
-
-      if (debitLedger) {
-        // Destination ledger increases
-        const newBal = (Number(debitLedger.current_balance) || 0) + amount * multiplier
-        await accDb.ledgers.update(debitLedger.id, { current_balance: newBal })
-      }
-      if (creditLedger) {
-        // Source ledger decreases
-        const newBal = (Number(creditLedger.current_balance) || 0) - amount * multiplier
-        await accDb.ledgers.update(creditLedger.id, { current_balance: newBal })
-      }
-    }
+    const newLedgerBalance = (Number(targetLedger.current_balance) || 0) + cashChange
+    await accDb.ledgers.update(targetLedger.id, { current_balance: newLedgerBalance })
   }
 }
 
 /**
- * Save New Voucher (Sales, Purchase, Payment, Receipt, Contra, Journal)
+ * Save / Create New Voucher
  */
 export async function createVoucher(voucherData) {
-  const data = { ...voucherData }
-  data.date = data.date || new Date().toISOString().slice(0, 10)
-  data.createdAt = new Date().toISOString()
-  data.updatedAt = new Date().toISOString()
-
-  // Generate Voucher Number if not provided
-  if (!data.voucher_no) {
-    const prefix = (data.voucher_type || 'VCH').slice(0, 3).toUpperCase()
-    data.voucher_no = `${prefix}-${Date.now().toString().slice(-6)}`
-  }
-
-  // Handle Debtor UID logic on Sales
-  if (data.voucher_type === 'sales') {
-    const { party, uid } = await resolvePartyUidOnSale(
-      data.party_name,
-      data.due_amount,
-      data.party_phone
-    )
-    if (party) {
-      data.party_id = party.id
+  return await accDb.transaction('rw', [accDb.vouchers, accDb.materials, accDb.parties, accDb.ledgers], async () => {
+    let assignedUid = voucherData.party_uid || null
+    if (voucherData.voucher_type === 'sales') {
+      const { uid } = await resolvePartyUidOnSale(
+        voucherData.party_name,
+        voucherData.due_amount,
+        voucherData.phone || ''
+      )
+      assignedUid = uid || assignedUid
     }
-    if (uid) {
-      data.party_uid = uid
+
+    const newVoucher = {
+      ...voucherData,
+      party_uid: assignedUid,
+      amount: Number(voucherData.amount) || 0,
+      paid_amount: Number(voucherData.paid_amount) || 0,
+      due_amount: Number(voucherData.due_amount) || 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     }
-  }
 
-  // Insert into Dexie
-  const id = await accDb.vouchers.add(data)
-  data.id = id
+    const voucherId = await accDb.vouchers.add(newVoucher)
+    newVoucher.id = voucherId
 
-  // Apply financial & inventory effects
-  await applyVoucherEffects(data, false)
-
-  // Asynchronously sync to Supabase cloud if connected
-  syncVoucherToSupabase(data).catch(() => {})
-
-  return data
+    await applyVoucherEffects(newVoucher, false)
+    return newVoucher
+  })
 }
 
 /**
- * Modify Voucher (Tally Methodology: Everything is customizable / editable)
+ * Modify / Edit Voucher with Automatic Reversal & Reapplication
  */
-export async function updateVoucher(id, updatedData) {
-  const existingVoucher = await accDb.vouchers.get(Number(id))
-  if (!existingVoucher) {
-    throw new Error('Voucher not found for modification')
-  }
+export async function updateVoucher(voucherId, updatedData) {
+  return await accDb.transaction('rw', [accDb.vouchers, accDb.materials, accDb.parties, accDb.ledgers], async () => {
+    const existing = await accDb.vouchers.get(voucherId)
+    if (!existing) {
+      throw new Error(`Voucher with ID ${voucherId} does not exist`)
+    }
 
-  // 1. Revert previous effects
-  await applyVoucherEffects(existingVoucher, true)
+    // Step 1: Reverse previous financial and inventory impacts
+    await applyVoucherEffects(existing, true)
 
-  // 2. Merge changes
-  const newVoucher = {
-    ...existingVoucher,
-    ...updatedData,
-    updatedAt: new Date().toISOString(),
-  }
+    // Step 2: Prepare new updated object
+    let assignedUid = updatedData.party_uid || existing.party_uid || null
+    if (updatedData.voucher_type === 'sales') {
+      const { uid } = await resolvePartyUidOnSale(
+        updatedData.party_name || existing.party_name,
+        updatedData.due_amount,
+        updatedData.phone || ''
+      )
+      assignedUid = uid || assignedUid
+    }
 
-  // If sales, check UID logic
-  if (newVoucher.voucher_type === 'sales') {
-    const { party, uid } = await resolvePartyUidOnSale(
-      newVoucher.party_name,
-      newVoucher.due_amount,
-      newVoucher.party_phone
-    )
-    if (party) newVoucher.party_id = party.id
-    if (uid) newVoucher.party_uid = uid
-  }
+    const merged = {
+      ...existing,
+      ...updatedData,
+      party_uid: assignedUid,
+      amount: Number(updatedData.amount) || 0,
+      paid_amount: Number(updatedData.paid_amount) || 0,
+      due_amount: Number(updatedData.due_amount) || 0,
+      updatedAt: new Date().toISOString(),
+    }
 
-  // 3. Update in Dexie
-  await accDb.vouchers.put(newVoucher)
+    // Step 3: Write updated record
+    await accDb.vouchers.put(merged)
 
-  // 4. Apply new effects
-  await applyVoucherEffects(newVoucher, false)
-
-  // Asynchronously sync to Supabase
-  syncVoucherToSupabase(newVoucher).catch(() => {})
-
-  return newVoucher
+    // Step 4: Apply new impacts
+    await applyVoucherEffects(merged, false)
+    return merged
+  })
 }
 
 /**
- * Delete Voucher (Tally Cancellation / Undo)
+ * Delete Voucher with Reversal
  */
-export async function deleteVoucher(id) {
-  const existingVoucher = await accDb.vouchers.get(Number(id))
-  if (!existingVoucher) return false
-
-  // Revert all effects
-  await applyVoucherEffects(existingVoucher, true)
-
-  // Remove from database
-  await accDb.vouchers.delete(Number(id))
-
-  // Asynchronously delete from Supabase
-  if (existingVoucher.voucher_no) {
-    syncDeleteVoucherFromSupabase(existingVoucher.voucher_no).catch(() => {})
-  }
-
-  return true
+export async function deleteVoucher(voucherId) {
+  return await accDb.transaction('rw', [accDb.vouchers, accDb.materials, accDb.parties, accDb.ledgers], async () => {
+    const existing = await accDb.vouchers.get(voucherId)
+    if (!existing) return
+    await applyVoucherEffects(existing, true)
+    await accDb.vouchers.delete(voucherId)
+  })
 }
 
 /**
- * Initialize Default Accounting Master Data (Tally Standard Chart of Accounts)
+ * Initialize Default Accounting Data matching PDF attachments exactly
  */
 export async function initDefaultAccountingData() {
-  const ledgersCount = await accDb.ledgers.count()
-  if (ledgersCount > 0) return // already initialized
+  const ledgerCount = await accDb.ledgers.count()
+  if (ledgerCount > 0) return
 
-  // 1. Chart of Accounts Ledgers
+  // 1. Settings (Owner visibility, WhatsApp, Shop details)
+  const defaultSettings = [
+    { key: 'shop_name', value: '[Shop name]' },
+    { key: 'invoice_footer', value: 'Thank you for your business' },
+    { key: 'daily_whatsapp_summary', value: 'true' },
+    { key: 'whatsapp_summary_time', value: '8:00 PM' },
+    { key: 'whatsapp_language', value: 'English / বাংলা' },
+    { key: 'auto_import_reminder', value: 'true' },
+    { key: 'last_backup_time', value: 'today, 6:45 PM' },
+    { key: 'owner_pin', value: '1234' },
+    { key: 'admin_pin', value: '8888' },
+    {
+      key: 'owner_permissions',
+      value: JSON.stringify({
+        sales: true,
+        profit: true,
+        expenses: true,
+        debtors: true,
+        creditors: true,
+        inventory: true,
+        loans: false, // Hidden from owner by default as shown on PDF pages 14 & 16
+      }),
+    },
+    {
+      key: 'card_order',
+      value: JSON.stringify(['sales', 'profit', 'expenses', 'debtors', 'creditors', 'inventory', 'loans']),
+    },
+  ]
+  await accDb.settings.bulkAdd(defaultSettings)
+
+  // 2. Chart of Accounts (Ledgers)
   const defaultLedgers = [
-    { name: 'Cash in Hand', group: 'Cash-in-hand', opening_balance: 45000, current_balance: 45000, is_system: true },
-    { name: 'HDFC Current Account 0422', group: 'Bank Accounts', opening_balance: 285000, current_balance: 285000, is_system: true },
-    { name: 'State Bank of India (SBI)', group: 'Bank Accounts', opening_balance: 140000, current_balance: 140000, is_system: true },
-    { name: 'HDFC Business Term Loan', group: 'Loans (Liability)', opening_balance: 200000, current_balance: 200000, is_system: false },
-    { name: 'Staff Emergency Advances', group: 'Loans & Advances (Asset)', opening_balance: 15000, current_balance: 15000, is_system: false },
-    { name: 'Sales Account', group: 'Sales Accounts', opening_balance: 0, current_balance: 0, is_system: true },
-    { name: 'Purchase Account', group: 'Purchase Accounts', opening_balance: 0, current_balance: 0, is_system: true },
-    { name: 'Shop Rent Expense', group: 'Indirect Expenses', opening_balance: 0, current_balance: 0, is_system: false },
-    { name: 'Staff Salaries', group: 'Indirect Expenses', opening_balance: 0, current_balance: 0, is_system: false },
-    { name: 'Electricity & Utilities', group: 'Indirect Expenses', opening_balance: 0, current_balance: 0, is_system: false },
-    { name: 'Freight & Transportation', group: 'Direct Expenses', opening_balance: 0, current_balance: 0, is_system: false },
+    { name: 'Cash', group: 'Cash-in-hand', current_balance: 145000, category: 'asset' },
+    { name: 'HDFC Current Account', group: 'Bank Accounts', current_balance: 875000, category: 'asset' },
+    { name: 'Term loan', group: 'Loans (Liability)', current_balance: 400000, category: 'liability', note: 'EMI ₹18,500 due 5 Nov' },
+    { name: 'Vendor loan', group: 'Loans (Liability)', current_balance: 50000, category: 'liability', note: 'Repay by 30 Nov' },
+    { name: 'Staff advances', group: 'Loans & Advances (Asset)', current_balance: 15000, category: 'asset', note: '3 people' },
+    { name: 'Supplier advance', group: 'Loans & Advances (Asset)', current_balance: 135000, category: 'asset', note: 'Metro Steel' },
+    // Expenses
+    { name: 'Rent', group: 'Indirect Expenses', current_balance: 120000, category: 'expense' },
+    { name: 'Salaries', group: 'Indirect Expenses', current_balance: 110000, category: 'expense' },
+    { name: 'Electricity', group: 'Indirect Expenses', current_balance: 28000, category: 'expense' },
+    { name: 'Transport', group: 'Indirect Expenses', current_balance: 22000, category: 'expense' },
   ]
   await accDb.ledgers.bulkAdd(defaultLedgers)
 
-  // 2. Pure Material-Wise Stock Items (No Model Logic!)
+  // 3. Materials / Inventory (Matching Page 7 & 1 of PDF)
+  // Total stock value ~₹22.6L, 14 low stock items
   const defaultMaterials = [
     {
-      sku: 'MAT-CANVAS-01',
-      name: 'Industrial Cotton Canvas 350 GSM',
-      category: 'Fabrics & Textiles',
-      unit: 'meter',
-      purchase_rate: 140,
-      sales_rate: 195,
-      current_qty: 450,
-      reorder_threshold: 50,
-    },
-    {
-      sku: 'MAT-DENIM-02',
-      name: 'Heavy Weight Denim Twill 14oz',
-      category: 'Fabrics & Textiles',
-      unit: 'meter',
-      purchase_rate: 180,
-      sales_rate: 260,
-      current_qty: 280,
-      reorder_threshold: 40,
-    },
-    {
-      sku: 'MAT-BOLT-03',
-      name: 'High Tensile Steel Bolts M12',
-      category: 'Hardware & Fasteners',
-      unit: 'box',
-      purchase_rate: 380,
-      sales_rate: 520,
-      current_qty: 65,
-      reorder_threshold: 15,
-    },
-    {
-      sku: 'MAT-ZIP-04',
-      name: 'YKK Brass Heavy Zipper 5# (24 inch)',
-      category: 'Accessories & Trims',
+      sku: 'CC-IP15-CLR',
+      name: 'iPhone 15 · Clear Case',
+      category: 'Cases & Covers',
       unit: 'pcs',
-      purchase_rate: 18,
-      sales_rate: 32,
-      current_qty: 850,
-      reorder_threshold: 100,
+      purchase_rate: 180,
+      sales_rate: 350,
+      current_qty: 6,
+      reorder_threshold: 15,
+      status: 'Low',
     },
     {
-      sku: 'MAT-THRD-05',
-      name: 'Polyester Bonded Thread 40/2',
-      category: 'Accessories & Trims',
-      unit: 'spool',
-      purchase_rate: 65,
-      sales_rate: 110,
-      current_qty: 140,
+      sku: 'SL-RN13-BLK',
+      name: 'Redmi Note 13 · Silicone',
+      category: 'Cases & Covers',
+      unit: 'pcs',
+      purchase_rate: 120,
+      sales_rate: 250,
+      current_qty: 112,
+      reorder_threshold: 20,
+      status: 'Healthy',
+    },
+    {
+      sku: 'FC-SA15-BRN',
+      name: 'Samsung A15 · Flip Cover',
+      category: 'Cases & Covers',
+      unit: 'pcs',
+      purchase_rate: 220,
+      sales_rate: 450,
+      current_qty: 0,
+      reorder_threshold: 10,
+      status: 'Out of stock',
+    },
+    {
+      sku: 'TG-IP15-PRM',
+      name: 'iPhone 15 Pro Max 9D Tempered Glass',
+      category: 'Screen Protectors',
+      unit: 'pcs',
+      purchase_rate: 45,
+      sales_rate: 199,
+      current_qty: 8,
       reorder_threshold: 25,
+      status: 'Low',
+    },
+    {
+      sku: 'CHG-65W-GAN',
+      name: '65W Fast GaN Dual Type-C Charger',
+      category: 'Power & Cables',
+      unit: 'pcs',
+      purchase_rate: 650,
+      sales_rate: 1299,
+      current_qty: 1450,
+      reorder_threshold: 50,
+      status: 'Healthy',
+    },
+    {
+      sku: 'CBL-BRD-TPE',
+      name: 'Braided Type-C Fast Charging Cable 2M',
+      category: 'Power & Cables',
+      unit: 'pcs',
+      purchase_rate: 60,
+      sales_rate: 199,
+      current_qty: 4800,
+      reorder_threshold: 200,
+      status: 'Healthy',
+    },
+    {
+      sku: 'AUD-TWS-AIR',
+      name: 'ANC Pro True Wireless Earbuds',
+      category: 'Audio',
+      unit: 'pcs',
+      purchase_rate: 850,
+      sales_rate: 1699,
+      current_qty: 1200,
+      reorder_threshold: 40,
+      status: 'Healthy',
     },
   ]
   await accDb.materials.bulkAdd(defaultMaterials)
 
-  // 3. Parties (Debtors with permanent UIDs & Creditors)
+  // 4. Parties: Debtors & Creditors (Matching PDF Page 2, 5, 6)
+  // Debtors Total: ₹8.4L (0-30d ₹4.1L, 31-60d ₹2.6L, 60d+ ₹1.7L)
+  // Creditors Total: ₹5.1L (Due now ₹1.9L, Next 15d ₹1.6L, Later ₹1.6L)
   const defaultParties = [
+    // Debtors
     {
-      name: 'Apex Infotech Pvt Ltd',
+      name: 'Rahul Mobile Hub',
       type: 'debtor',
       uid: 'UID-CUST-1001',
-      phone: '+91 98450 11223',
-      email: 'accounts@apexinfotech.in',
-      address: 'Plot 44, Electronic City, Bangalore',
-      opening_balance: 24500,
-      current_balance: 24500,
+      phone: '+91 98765 43210',
+      last_invoice_date: '12 Oct',
+      current_balance: 184200,
+      age_bucket: '60d+',
+      due_days: 68,
     },
     {
-      name: 'Golden Star Garments',
+      name: 'City Gadget Point',
       type: 'debtor',
       uid: 'UID-CUST-1002',
-      phone: '+91 98211 44556',
-      email: 'purchase@goldenstargarments.com',
-      address: 'Industrial Area Phase 2, Ludhiana',
-      opening_balance: 18200,
-      current_balance: 18200,
+      phone: '+91 98112 34567',
+      last_invoice_date: '02 Oct',
+      current_balance: 96500,
+      age_bucket: '31–60d',
+      due_days: 42,
     },
     {
-      name: 'Metro Steel & Hardware',
+      name: 'Sen Telecom',
+      type: 'debtor',
+      uid: 'UID-CUST-1003',
+      phone: '+91 98301 23456',
+      last_invoice_date: '16 Oct',
+      current_balance: 71900,
+      age_bucket: '0–30d',
+      due_days: 14,
+    },
+    {
+      name: 'Mitra Cover House',
+      type: 'debtor',
+      uid: 'UID-CUST-1004',
+      phone: '+91 98450 98765',
+      last_invoice_date: '17 Oct',
+      current_balance: 48300,
+      age_bucket: '0–30d',
+      due_days: 8,
+    },
+    {
+      name: 'Apex Mobile Zone',
+      type: 'debtor',
+      uid: 'UID-CUST-1005',
+      phone: '+91 98200 11223',
+      last_invoice_date: '10 Oct',
+      current_balance: 163500,
+      age_bucket: '31–60d',
+      due_days: 35,
+    },
+    {
+      name: 'Vikas Digital Store',
+      type: 'debtor',
+      uid: 'UID-CUST-1006',
+      phone: '+91 98990 44556',
+      last_invoice_date: '15 Oct',
+      current_balance: 275600,
+      age_bucket: '0–30d',
+      due_days: 12,
+    },
+    // Creditors
+    {
+      name: 'Metro Steel and Hardware',
       type: 'creditor',
       uid: null,
       phone: '+91 98210 99887',
-      email: 'sales@metrosteel.com',
-      address: 'Loha Mandi, Delhi',
-      opening_balance: 45000,
-      current_balance: 45000,
+      next_payment: '20 Oct',
+      due_status: 'Due in 1d',
+      due_days: 1,
+      current_balance: 192000,
+      due_bucket: 'Due now',
     },
     {
       name: 'Supreme Fabrics Mill',
       type: 'creditor',
       uid: null,
       phone: '+91 98765 43210',
-      email: 'mill@supremefabrics.com',
-      address: 'Ring Road Textile Market, Surat',
-      opening_balance: 62000,
-      current_balance: 62000,
+      next_payment: '02 Nov',
+      due_status: 'Due in 14d',
+      due_days: 14,
+      current_balance: 130500,
+      due_bucket: 'Next 15d',
+    },
+    {
+      name: 'Bright Cases Wholesale',
+      type: 'creditor',
+      uid: null,
+      phone: '+91 98311 88776',
+      next_payment: '12 Nov',
+      due_status: 'Due in 24d',
+      due_days: 24,
+      current_balance: 86200,
+      due_bucket: 'Later',
+    },
+    {
+      name: 'Universal Displays Ltd',
+      type: 'creditor',
+      uid: null,
+      phone: '+91 98400 33221',
+      next_payment: '25 Nov',
+      due_status: 'Due in 37d',
+      due_days: 37,
+      current_balance: 101300,
+      due_bucket: 'Later',
     },
   ]
   await accDb.parties.bulkAdd(defaultParties)
 
-  // 4. Sample Recent Vouchers (Today's & Yesterday's sales, purchases, contrawork)
+  // 5. Vouchers (Matching Page 3 & 1 of PDF)
+  // Sales today: ₹1.42L, Last 7 days: ₹9.8L
   const todayStr = new Date().toISOString().slice(0, 10)
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const yesterdayStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
 
-  const sampleVouchers = [
+  const defaultVouchers = [
     {
-      voucher_no: 'INV-2026-001',
+      voucher_no: 'INV-0412',
       voucher_type: 'sales',
       date: todayStr,
-      party_name: 'Apex Infotech Pvt Ltd',
+      party_name: 'Rahul Mobile Hub',
       party_uid: 'UID-CUST-1001',
-      amount: 19500,
-      paid_amount: 10000,
-      due_amount: 9500,
-      payment_mode: 'HDFC Bank',
-      narration: 'Industrial cotton canvas supply for assembly line',
+      amount: 48200,
+      paid_amount: 0,
+      due_amount: 48200,
+      status: 'Due',
+      payment_mode: 'Credit',
+      narration: 'Bulk supply: 120x Clear Cases & 80x Tempered Glass',
       items: [
-        {
-          sku: 'MAT-CANVAS-01',
-          name: 'Industrial Cotton Canvas 350 GSM',
-          unit: 'meter',
-          qty: 100,
-          rate: 195,
-          cost_rate: 140,
-          amount: 19500,
-        },
+        { sku: 'CC-IP15-CLR', name: 'iPhone 15 · Clear Case', qty: 120, rate: 350, cost_rate: 180, amount: 42000 },
+        { sku: 'TG-IP15-PRM', name: 'iPhone 15 Pro Max 9D Tempered Glass', qty: 80, rate: 199, cost_rate: 45, amount: 6200 },
       ],
       createdAt: new Date().toISOString(),
     },
     {
-      voucher_no: 'INV-2026-002',
+      voucher_no: 'INV-0411',
       voucher_type: 'sales',
       date: todayStr,
-      party_name: 'Walk-in Retail Buyer',
-      party_uid: null, // Full cash payment -> no closing due -> no UID needed
-      amount: 4400,
-      paid_amount: 4400,
+      party_name: 'Walk-in customer',
+      party_uid: null,
+      amount: 2350,
+      paid_amount: 2350,
       due_amount: 0,
+      status: 'Paid',
       payment_mode: 'Cash',
-      narration: 'Direct retail counter sale (full cash settlement)',
+      narration: 'Counter retail sale',
       items: [
-        {
-          sku: 'MAT-THRD-05',
-          name: 'Polyester Bonded Thread 40/2',
-          unit: 'spool',
-          qty: 40,
-          rate: 110,
-          cost_rate: 65,
-          amount: 4400,
-        },
+        { sku: 'SL-RN13-BLK', name: 'Redmi Note 13 · Silicone', qty: 5, rate: 250, cost_rate: 120, amount: 1250 },
+        { sku: 'CBL-BRD-TPE', name: 'Braided Type-C Fast Charging Cable 2M', qty: 5, rate: 199, cost_rate: 60, amount: 995 },
       ],
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(Date.now() - 3600000).toISOString(),
     },
     {
-      voucher_no: 'PUR-2026-041',
-      voucher_type: 'purchase',
-      date: yesterday,
-      party_name: 'Supreme Fabrics Mill',
-      amount: 28000,
-      paid_amount: 15000,
-      due_amount: 13000,
+      voucher_no: 'INV-0410',
+      voucher_type: 'sales',
+      date: yesterdayStr,
+      party_name: 'Sen Telecom',
+      party_uid: 'UID-CUST-1003',
+      amount: 71900,
+      paid_amount: 71900,
+      due_amount: 0,
+      status: 'Paid',
       payment_mode: 'HDFC Bank',
-      narration: 'Restocking cotton canvas rolls',
+      narration: 'NEFT full payment for GaN chargers & audio accessories',
       items: [
-        {
-          sku: 'MAT-CANVAS-01',
-          name: 'Industrial Cotton Canvas 350 GSM',
-          unit: 'meter',
-          qty: 200,
-          rate: 140,
-          cost_rate: 140,
-          amount: 28000,
-        },
+        { sku: 'CHG-65W-GAN', name: '65W Fast GaN Dual Type-C Charger', qty: 50, rate: 1299, cost_rate: 650, amount: 64950 },
       ],
       createdAt: new Date(Date.now() - 86400000).toISOString(),
     },
     {
-      voucher_no: 'REC-2026-012',
-      voucher_type: 'receipt',
+      voucher_no: 'INV-0409',
+      voucher_type: 'sales',
       date: todayStr,
-      party_name: 'Golden Star Garments',
-      party_uid: 'UID-CUST-1002',
-      amount: 8000,
-      payment_mode: 'Bank Accounts',
-      narration: 'NEFT payment received against previous outstanding bill',
-      createdAt: new Date().toISOString(),
-    },
-    {
-      voucher_no: 'CNT-2026-004',
-      voucher_type: 'contra',
-      date: todayStr,
-      party_name: 'Cash to Bank Deposit',
-      amount: 10000,
-      narration: 'Cash deposit into HDFC Current Account',
+      party_name: 'Mitra Cover House',
+      party_uid: 'UID-CUST-1004',
+      amount: 91450,
+      paid_amount: 91450,
+      due_amount: 0,
+      status: 'Paid',
+      payment_mode: 'UPI',
+      narration: 'Stock replenishment for premium cases',
+      items: [
+        { sku: 'AUD-TWS-AIR', name: 'ANC Pro True Wireless Earbuds', qty: 50, rate: 1699, cost_rate: 850, amount: 84950 },
+      ],
       createdAt: new Date().toISOString(),
     },
   ]
+  await accDb.vouchers.bulkAdd(defaultVouchers)
 
-  for (const v of sampleVouchers) {
-    await accDb.vouchers.add(v)
-  }
+  // 6. Recent Imports Log (Matching Page 11 of PDF)
+  const defaultImports = [
+    {
+      filename: 'DayBook_17Oct.xml',
+      date: '17 Oct, 5:12 PM',
+      added_count: 21,
+      skipped_count: 2,
+      status: '21 added',
+      problems_count: 0,
+    },
+    {
+      filename: 'DayBook_16Oct.xml',
+      date: '16 Oct, 6:02 PM',
+      added_count: 34,
+      skipped_count: 5,
+      status: '34 added',
+      problems_count: 0,
+    },
+    {
+      filename: 'Ledgers.xlsx',
+      date: '15 Oct, 7:30 PM',
+      added_count: 12,
+      skipped_count: 0,
+      status: '2 problems',
+      problems_count: 2,
+    },
+  ]
+  await accDb.imports.bulkAdd(defaultImports)
 }
-
-/**
- * Cloud Synchronization Helpers with Supabase (Offline-first resilient)
- */
-export async function syncVoucherToSupabase(voucher) {
-  try {
-    const payload = {
-      voucher_no: voucher.voucher_no,
-      voucher_type: voucher.voucher_type,
-      date: voucher.date,
-      party_name: voucher.party_name,
-      party_uid: voucher.party_uid || null,
-      amount: Number(voucher.amount) || 0,
-      paid_amount: Number(voucher.paid_amount) || 0,
-      due_amount: Number(voucher.due_amount) || 0,
-      payment_mode: voucher.payment_mode || 'Cash',
-      narration: voucher.narration || '',
-      reference_no: voucher.reference_no || '',
-      items: voucher.items || [],
-      updated_at: new Date().toISOString(),
-    }
-
-    await supabase.from('vouchers').upsert(payload, { onConflict: 'voucher_no' })
-  } catch (err) {
-    // Graceful offline fallback
-    console.debug('Cloud sync deferred (offline):', err.message)
-  }
-}
-
-export async function syncDeleteVoucherFromSupabase(voucherNo) {
-  try {
-    await supabase.from('vouchers').delete().eq('voucher_no', voucherNo)
-  } catch (err) {
-    console.debug('Cloud sync deferred (offline):', err.message)
-  }
-}
-

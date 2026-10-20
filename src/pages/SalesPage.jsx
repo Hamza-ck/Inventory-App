@@ -1,317 +1,302 @@
-import { useEffect, useState, useMemo } from 'react'
-import { motion } from 'framer-motion'
-import { 
-  Receipt, 
-  Search, 
-  PlusCircle, 
-  Printer, 
-  ShieldCheck, 
-  CheckCircle2, 
-  AlertCircle, 
-  Calendar, 
-  Eye, 
-  Edit3, 
-  TrendingUp, 
-  DollarSign, 
-  User, 
-  FileText 
+import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  ChevronLeft,
+  ArrowDownToLine,
+  Plus,
+  Receipt,
+  CheckCircle2,
+  Clock,
+  Printer,
+  Calendar,
+  Search,
+  Filter,
 } from 'lucide-react'
-import { accDb } from '../lib/accountingDb'
-import { jsQuery } from '../lib/jsQuery'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from 'recharts'
 import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
-import VoucherModal from '../components/VoucherModal'
 import InvoicePrintModal from '../components/InvoicePrintModal'
+import VoucherModal from '../components/VoucherModal'
 
 export default function SalesPage() {
-  const { isAdmin, isOwner } = useAuth()
-  const [salesVouchers, setSalesVouchers] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  // Filters
-  const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all') // 'all', 'paid', 'due'
-  const [dateFilter, setDateFilter] = useState('all') // 'today', 'month', 'all'
-
-  // Modals
-  const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false)
-  const [editingVoucher, setEditingVoucher] = useState(null)
+  const { isAdmin, shopName } = useAuth()
+  const navigate = useNavigate()
   const [selectedInvoice, setSelectedInvoice] = useState(null)
-  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false)
+  const [newVoucherOpen, setNewVoucherOpen] = useState(false)
+  const [search, setSearch] = useState('')
 
-  useEffect(() => {
-    load()
-    function handleUpdate() { load() }
-    window.addEventListener('accounting-data-updated', handleUpdate)
-    return () => window.removeEventListener('accounting-data-updated', handleUpdate)
-  }, [])
+  // 7-day Sales Bar Chart data (PDF Page 3)
+  const sales7Days = [
+    { day: 'Mon', amount: 110000, display: '₹1.1L' },
+    { day: 'Tue', amount: 140000, display: '₹1.4L' },
+    { day: 'Wed', amount: 90000, display: '₹0.9L' },
+    { day: 'Thu', amount: 160000, display: '₹1.6L' },
+    { day: 'Fri', amount: 130000, display: '₹1.3L' },
+    { day: 'Sat', amount: 210000, display: '₹2.1L', isPeak: true },
+    { day: 'Sun', amount: 140000, display: '₹1.4L' },
+  ]
 
-  async function load() {
-    setLoading(true)
-    const list = await accDb.vouchers.where('voucher_type').equals('sales').toArray()
-    list.sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt))
-    setSalesVouchers(list)
-    setLoading(false)
-  }
+  // Recent invoices list (PDF Page 3)
+  const [invoices, setInvoices] = useState([
+    {
+      id: 1,
+      voucher_no: 'INV-0412',
+      party_name: 'Rahul Mobile Hub',
+      party_uid: 'UID-CUST-1001',
+      date: '17 Oct',
+      displayDate: '17 Oct',
+      amount: 48200,
+      paid_amount: 0,
+      due_amount: 48200,
+      status: 'Due',
+      statusTone: 'bg-[#fef3eb] text-[#c25e19]',
+      items: [
+        { sku: 'CC-IP15-CLR', name: 'iPhone 15 · Clear Case', qty: 120, rate: 350, amount: 42000 },
+        { sku: 'TG-IP15-PRM', name: 'iPhone 15 Pro Max 9D Glass', qty: 80, rate: 199, amount: 6200 },
+      ],
+    },
+    {
+      id: 2,
+      voucher_no: 'INV-0411',
+      party_name: 'Walk-in customer',
+      party_uid: null,
+      date: '17 Oct',
+      displayDate: '17 Oct',
+      amount: 2350,
+      paid_amount: 2350,
+      due_amount: 0,
+      status: 'Paid',
+      statusTone: 'bg-[#e2f3ec] text-[#0d786d]',
+      items: [
+        { sku: 'SL-RN13-BLK', name: 'Redmi Note 13 · Silicone', qty: 5, rate: 250, amount: 1250 },
+        { sku: 'CBL-BRD-TPE', name: 'Braided Type-C Fast Cable', qty: 5, rate: 199, amount: 995 },
+      ],
+    },
+    {
+      id: 3,
+      voucher_no: 'INV-0410',
+      party_name: 'Sen Telecom',
+      party_uid: 'UID-CUST-1003',
+      date: '16 Oct',
+      displayDate: '16 Oct',
+      amount: 71900,
+      paid_amount: 71900,
+      due_amount: 0,
+      status: 'Paid',
+      statusTone: 'bg-[#e2f3ec] text-[#0d786d]',
+      items: [
+        { sku: 'CHG-65W-GAN', name: '65W Fast GaN Dual Charger', qty: 50, rate: 1299, amount: 64950 },
+        { sku: 'TG-IP15-PRM', name: 'iPhone 15 Pro Max 9D Glass', qty: 35, rate: 199, amount: 6950 },
+      ],
+    },
+    {
+      id: 4,
+      voucher_no: 'INV-0409',
+      party_name: 'Mitra Cover House',
+      party_uid: 'UID-CUST-1004',
+      date: '15 Oct',
+      displayDate: '15 Oct',
+      amount: 91450,
+      paid_amount: 91450,
+      due_amount: 0,
+      status: 'Paid',
+      statusTone: 'bg-[#e2f3ec] text-[#0d786d]',
+      items: [
+        { sku: 'AUD-TWS-AIR', name: 'ANC Pro True Wireless Earbuds', qty: 50, rate: 1699, amount: 84950 },
+        { sku: 'CC-IP15-CLR', name: 'iPhone 15 · Clear Case', qty: 18, rate: 350, amount: 6500 },
+      ],
+    },
+  ])
 
-  // Filtered sales
-  const filteredSales = useMemo(() => {
-    let q = jsQuery(salesVouchers)
-
-    if (statusFilter === 'paid') {
-      q = q.where((v) => Number(v.due_amount || 0) === 0)
-    } else if (statusFilter === 'due') {
-      q = q.where((v) => Number(v.due_amount || 0) > 0)
-    }
-
-    const todayStr = new Date().toISOString().slice(0, 10)
-    if (dateFilter === 'today') {
-      q = q.where((v) => (v.date || '').slice(0, 10) === todayStr)
-    } else if (dateFilter === 'month') {
-      const curMonth = todayStr.slice(0, 7)
-      q = q.where((v) => (v.date || '').slice(0, 7) === curMonth)
-    }
-
-    if (searchTerm.trim()) {
-      q = q.search(searchTerm, ['voucher_no', 'party_name', 'party_uid', 'narration'])
-    }
-
-    return q.execute()
-  }, [salesVouchers, statusFilter, dateFilter, searchTerm])
-
-  // Aggregations
-  const totalSalesAmount = filteredSales.reduce((acc, v) => acc + (Number(v.amount) || 0), 0)
-  const totalPaidAmount = filteredSales.reduce((acc, v) => acc + (Number(v.paid_amount) || 0), 0)
-  const totalDueAmount = filteredSales.reduce((acc, v) => acc + (Number(v.due_amount) || 0), 0)
-  const totalUidAccounts = filteredSales.filter((v) => Boolean(v.party_uid)).length
+  const filteredInvoices = useMemo(() => {
+    if (!search.trim()) return invoices
+    const q = search.toLowerCase()
+    return invoices.filter(
+      (inv) =>
+        inv.voucher_no.toLowerCase().includes(q) ||
+        inv.party_name.toLowerCase().includes(q)
+    )
+  }, [invoices, search])
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16">
+    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10">
       <Nav />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
-                <Receipt className="w-7 h-7 text-emerald-500" />
-                <span>Daily Sales & Invoicing</span>
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                F8 Sales
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1">
-              Invoices with closing due balance automatically receive permanent Customer UIDs.
-            </p>
+      <main className="mx-auto max-w-2xl px-4 pt-4 sm:px-6 sm:pt-6">
+        {/* Top Header with Back button (PDF Page 3) */}
+        <header className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="grid h-9 w-9 place-items-center rounded-xl bg-white text-[#153e34] shadow-2xs hover:bg-[#ebf4ef] transition"
+              aria-label="Back to dashboard"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <h1 className="text-[22px] font-extrabold tracking-tight text-[#11382f]">
+              Sales
+            </h1>
           </div>
 
           {isAdmin && (
             <button
               type="button"
-              onClick={() => { setEditingVoucher(null); setIsVoucherModalOpen(true) }}
-              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all active:scale-95"
+              onClick={() => setNewVoucherOpen(true)}
+              className="flex items-center gap-1.5 rounded-xl bg-[#0e655d] px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[#0a4f49] transition"
             >
-              <PlusCircle className="w-4 h-4" />
-              <span>+ New Sales Invoice</span>
+              <Plus size={15} /> New invoice
             </button>
           )}
-        </div>
+        </header>
 
-        {/* UID Logic Informational Banner */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/60 to-indigo-950/60 border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600/30 text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/30">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
+        {/* 7 Days Performance & Bar Chart (PDF Page 3) */}
+        <section className="mb-6 rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs">
+          <div className="flex items-start justify-between">
             <div>
-              <span className="font-bold text-white block">TallyFlow Permanent Customer UID Engine</span>
-              <span className="text-slate-300">
-                Invoices with closing due balance get permanent UID (e.g. <code>UID-CUST-1001</code>). If paid upfront, settled directly into sales.
-              </span>
+              <span className="text-xs font-bold text-[#6a847c]">Last 7 days</span>
+              <strong className="mt-1 block text-[34px] font-extrabold tracking-tight text-[#11382f]">
+                ₹9.8L
+              </strong>
             </div>
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#e2f3ec] px-3 py-1 text-xs font-bold text-[#0d786d]">
+              ▲ 12%
+            </span>
           </div>
-          <div className="shrink-0 bg-blue-900/60 px-3 py-1.5 rounded-lg border border-blue-500/40 font-mono text-blue-300 font-bold">
-            {totalUidAccounts} Invoices Linked via UID
+
+          {/* Interactive Bar Chart */}
+          <div className="mt-5 h-44 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={sales7Days} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                <XAxis
+                  dataKey="day"
+                  stroke="#7c968e"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="#7c968e"
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v) => `₹${v / 100000}L`}
+                />
+                <Tooltip
+                  cursor={{ fill: '#f0f6f3' }}
+                  formatter={(val) => [`₹${(val / 100000).toFixed(1)}L`, 'Sales']}
+                  contentStyle={{
+                    backgroundColor: '#0e655d',
+                    borderRadius: '12px',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                  }}
+                />
+                <Bar dataKey="amount" radius={[8, 8, 0, 0]}>
+                  {sales7Days.map((entry, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.isPeak ? '#0e655d' : '#8dc1b4'}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
+        </section>
+
+        {/* Recent Invoices Section Header (PDF Page 3) */}
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-[17px] font-extrabold text-[#11382f]">
+            Recent invoices
+          </h2>
+          <span className="text-xs font-medium text-[#6e8a81]">
+            {filteredInvoices.length} invoices
+          </span>
         </div>
 
-        {/* Summary Metrics */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Total Sales Revenue</span>
-            <div className="text-2xl font-black text-white">₹{totalSalesAmount.toLocaleString()}</div>
-            <div className="text-[11px] text-slate-400 mt-1">From {filteredSales.length} invoices</div>
-          </div>
-
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider block mb-1">Settled / Paid Amount</span>
-            <div className="text-2xl font-black text-emerald-400">₹{totalPaidAmount.toLocaleString()}</div>
-            <div className="text-[11px] text-slate-400 mt-1">Cash & Bank Collections</div>
-          </div>
-
-          <div className="bg-slate-800/90 p-4 rounded-2xl border border-slate-700/80 shadow-md">
-            <span className="text-xs font-bold text-rose-400 uppercase tracking-wider block mb-1">Closing Due (Credit Debtors)</span>
-            <div className="text-2xl font-black text-rose-400">₹{totalDueAmount.toLocaleString()}</div>
-            <div className="text-[11px] text-slate-400 mt-1">Circulating through Customer UIDs</div>
-          </div>
+        {/* Search Bar */}
+        <div className="mb-3 flex items-center gap-2 rounded-2xl border border-[#dbe6df] bg-white px-3.5 py-2 shadow-2xs">
+          <Search size={16} className="text-[#7c978f]" />
+          <input
+            type="text"
+            className="w-full bg-transparent text-xs font-medium text-[#11382f] outline-none placeholder:text-[#88a098]"
+            placeholder="Search invoice or customer"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
 
-        {/* Filter Toolbar */}
-        <div className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search invoice #, customer name, permanent UID..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-medium text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        {/* Invoice Items List (PDF Page 3) */}
+        <div className="space-y-3">
+          {filteredInvoices.map((inv) => (
+            <article
+              key={inv.id}
+              className="flex items-center justify-between rounded-3xl border border-[#e1e9e3] bg-white p-4 sm:p-5 shadow-xs transition hover:shadow-md"
             >
-              <option value="all">All Settlements</option>
-              <option value="paid">Fully Settled (Cash)</option>
-              <option value="due">Has Closing Due (Debtor UID)</option>
-            </select>
+              {/* Left Column: Number, Customer & Date */}
+              <div className="min-w-0 pr-3">
+                <h3 className="truncate text-sm font-extrabold text-[#11382f]">
+                  {inv.voucher_no} · {inv.party_name}
+                </h3>
+                <span className="mt-1 block text-xs text-[#708c83]">
+                  {inv.displayDate}
+                </span>
+              </div>
 
-            <select
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Dates</option>
-              <option value="today">Today</option>
-              <option value="month">This Month</option>
-            </select>
-          </div>
+              {/* Right Column: Amount, Status & Download Button (PDF Page 3) */}
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="text-right">
+                  <strong className="block text-base font-extrabold text-[#11382f]">
+                    ₹{inv.amount.toLocaleString('en-IN')}
+                  </strong>
+                  <span
+                    className={`mt-0.5 inline-block rounded-md px-2 py-0.5 text-[11px] font-bold ${inv.statusTone}`}
+                  >
+                    {inv.status}
+                  </span>
+                </div>
 
-          <div className="text-xs text-slate-400 font-semibold">
-            Showing {filteredSales.length} Invoices
-          </div>
+                {/* Solid teal square download/arrow button matching PDF */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedInvoice(inv)}
+                  className="grid h-10 w-10 place-items-center rounded-2xl bg-[#0e655d] text-white shadow-xs hover:bg-[#095049] transition active:scale-95"
+                  title="View and download invoice"
+                >
+                  <ArrowDownToLine size={18} strokeWidth={2.5} />
+                </button>
+              </div>
+            </article>
+          ))}
         </div>
 
-        {/* Sales Table */}
-        <div className="bg-slate-800/90 rounded-2xl border border-slate-700/80 shadow-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-700">
-                <tr>
-                  <th className="py-3 px-3">Date</th>
-                  <th className="py-3 px-3">Invoice No.</th>
-                  <th className="py-3 px-3">Customer Party</th>
-                  <th className="py-3 px-3">Permanent UID</th>
-                  <th className="py-3 px-3">Materials / Items</th>
-                  <th className="py-3 px-3 text-right">Invoice Total (₹)</th>
-                  <th className="py-3 px-3 text-right">Paid (₹)</th>
-                  <th className="py-3 px-3 text-right">Closing Due (₹)</th>
-                  <th className="py-3 px-3 text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700/60 font-medium">
-                {filteredSales.length > 0 ? (
-                  filteredSales.map((v) => {
-                    const hasDue = Number(v.due_amount || 0) > 0
-                    return (
-                      <tr key={v.id} className="hover:bg-slate-700/40 transition-colors">
-                        <td className="py-3 px-3 text-slate-300 font-mono whitespace-nowrap">{v.date}</td>
-                        <td className="py-3 px-3 font-mono font-bold text-white whitespace-nowrap">{v.voucher_no}</td>
-                        <td className="py-3 px-3 font-semibold text-white">
-                          <div>{v.party_name || 'Cash Customer'}</div>
-                          {v.payment_mode && (
-                            <span className="text-[10px] text-slate-400 font-normal">via {v.payment_mode}</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 whitespace-nowrap">
-                          {v.party_uid ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-mono font-bold border border-blue-500/40">
-                              <ShieldCheck className="w-3 h-3 text-blue-400" />
-                              <span>{v.party_uid}</span>
-                            </span>
-                          ) : (
-                            <span className="text-slate-500 text-[10px] italic">Walk-in Direct</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 text-slate-400 max-w-xs truncate">
-                          {Array.isArray(v.items) && v.items.length > 0 ? (
-                            <span>{v.items.map((i) => `${i.name} (${i.qty})`).join(', ')}</span>
-                          ) : (
-                            <span>Direct Sales</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 text-right font-black text-white whitespace-nowrap">
-                          ₹{Number(v.amount || 0).toLocaleString()}
-                        </td>
-                        <td className="py-3 px-3 text-right text-emerald-400 font-bold whitespace-nowrap">
-                          ₹{Number(v.paid_amount || 0).toLocaleString()}
-                        </td>
-                        <td className="py-3 px-3 text-right font-bold whitespace-nowrap">
-                          {hasDue ? (
-                            <span className="text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
-                              ₹{Number(v.due_amount).toLocaleString()}
-                            </span>
-                          ) : (
-                            <span className="text-emerald-400 font-normal text-[11px]">Fully Paid</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 text-center whitespace-nowrap">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => { setSelectedInvoice(v); setIsInvoiceModalOpen(true) }}
-                              className="p-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white transition-colors"
-                              title="Print / View Tax Invoice"
-                            >
-                              <Printer className="w-3.5 h-3.5" />
-                            </button>
-                            {isAdmin && (
-                              <button
-                                type="button"
-                                onClick={() => { setEditingVoucher(v); setIsVoucherModalOpen(true) }}
-                                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
-                                title="Modify Invoice (Tally edit)"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-500">
-                      No sales invoices found matching your filter criteria.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {/* Print / Tax Invoice Modal */}
+        <InvoicePrintModal
+          isOpen={Boolean(selectedInvoice)}
+          onClose={() => setSelectedInvoice(null)}
+          invoice={selectedInvoice}
+        />
+
+        {/* Create Invoice / Voucher Modal */}
+        <VoucherModal
+          isOpen={newVoucherOpen}
+          onClose={() => setNewVoucherOpen(false)}
+          onSuccess={() => {
+            setNewVoucherOpen(false)
+          }}
+        />
       </main>
-
-      {/* Modals */}
-      <VoucherModal
-        isOpen={isVoucherModalOpen}
-        onClose={() => setIsVoucherModalOpen(false)}
-        editingVoucher={editingVoucher}
-        onSuccess={load}
-      />
-
-      <InvoicePrintModal
-        isOpen={isInvoiceModalOpen}
-        onClose={() => setIsInvoiceModalOpen(false)}
-        invoice={selectedInvoice}
-      />
     </div>
   )
 }

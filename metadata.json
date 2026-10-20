@@ -1,0 +1,8 @@
+{
+  "name": "MEEMX ERP — Complete Accounting Solutions",
+  "description": "SaaS accounting solutions for daily sales, profits, cash & bank, loans, debtors with permanent UIDs, creditors, and inventory with complete Tally file support.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
