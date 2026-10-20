@@ -1,233 +1,374 @@
-import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Plus, 
-  Trash2, 
-  Check, 
-  AlertCircle, 
-  CreditCard, 
-  FileText, 
-  DollarSign, 
-  Layers,
-  ArrowRightLeft,
-  Calendar,
+import { useState, useEffect, useMemo } from 'react'
+import {
+  X,
+  Plus,
+  Minus,
+  Trash2,
+  CheckCircle2,
+  AlertCircle,
+  Receipt,
   User,
+  Calendar,
+  Phone,
+  CreditCard,
   Hash,
-  ShieldCheck,
-  Building2,
-  Package
+  Box,
+  BadgeCheck,
+  Printer,
 } from 'lucide-react'
 import { accDb, createVoucher, updateVoucher } from '../lib/accountingDb'
 import { useAuth } from '../context/AuthContext'
 
-const VOUCHER_TYPES = [
-  { id: 'sales', label: 'Sales (F8)', color: 'bg-emerald-600 text-white', border: 'border-emerald-600' },
-  { id: 'purchase', label: 'Purchase (F9)', color: 'bg-blue-600 text-white', border: 'border-blue-600' },
-  { id: 'receipt', label: 'Receipt (F6)', color: 'bg-teal-600 text-white', border: 'border-teal-600' },
-  { id: 'payment', label: 'Payment (F5)', color: 'bg-rose-600 text-white', border: 'border-rose-600' },
-  { id: 'contra', label: 'Contra (F4)', color: 'bg-amber-600 text-white', border: 'border-amber-600' },
-  { id: 'journal', label: 'Journal (F7)', color: 'bg-indigo-600 text-white', border: 'border-indigo-600' },
-]
-
-export default function VoucherModal({ isOpen, onClose, editingVoucher = null, onSuccess }) {
-  const { isAdmin, isOwner } = useAuth()
+export default function VoucherModal({
+  isOpen,
+  onClose,
+  editingVoucher = null,
+  onSuccess,
+  onSaveAndPrint,
+}) {
+  const { shopName } = useAuth()
 
   // Form State
-  const [voucherType, setVoucherType] = useState('sales')
   const [voucherNo, setVoucherNo] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [partyName, setPartyName] = useState('')
   const [partyPhone, setPartyPhone] = useState('')
-  const [paymentMode, setPaymentMode] = useState('HDFC Bank')
+  const [paymentMode, setPaymentMode] = useState('Cash')
   const [narration, setNarration] = useState('')
-  const [referenceNo, setReferenceNo] = useState('')
+  const [discountType, setDiscountType] = useState('flat') // 'flat' | 'percent'
+  const [discountVal, setDiscountVal] = useState(0)
+  const [taxPercent, setTaxPercent] = useState(0) // 0, 5, 12, 18
+  const [paidAmount, setPaidAmount] = useState(0)
+  const [isCustomPaid, setIsCustomPaid] = useState(false)
 
-  // Ledgers for Contra, Receipt, Payment, Journal
-  const [debitLedgerId, setDebitLedgerId] = useState('')
-  const [creditLedgerId, setCreditLedgerId] = useState('')
-
-  // Sales / Purchase Inventory Line Items
   const [items, setItems] = useState([
-    { material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }
+    {
+      material_id: '',
+      sku: '',
+      name: '',
+      qty: 1,
+      rate: 0,
+      cost_rate: 0,
+      unit: 'pcs',
+      amount: 0,
+    },
   ])
 
-  // Paid amount (for split credit/cash sales)
-  const [paidAmount, setPaidAmount] = useState(0)
-
-  // Direct Amount for non-inventory vouchers (Receipt, Payment, Contra, Journal)
-  const [directAmount, setDirectAmount] = useState(0)
-
-  // Data Sources
+  // Masters loaded from Dexie
   const [materials, setMaterials] = useState([])
   const [parties, setParties] = useState([])
-  const [ledgers, setLedgers] = useState([])
+  const [customerSuggestions, setCustomerSuggestions] = useState([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState('')
 
-  // Load master data on open
+  // Load materials & existing parties
   useEffect(() => {
     if (!isOpen) return
-    loadMasters()
-  }, [isOpen])
+    let active = true
 
-  // Populate editing data if modifying existing voucher
-  useEffect(() => {
-    if (editingVoucher) {
-      setVoucherType(editingVoucher.voucher_type || 'sales')
-      setVoucherNo(editingVoucher.voucher_no || '')
-      setDate(editingVoucher.date || new Date().toISOString().slice(0, 10))
-      setPartyName(editingVoucher.party_name || '')
-      setPartyPhone(editingVoucher.party_phone || '')
-      setPaymentMode(editingVoucher.payment_mode || 'HDFC Bank')
-      setNarration(editingVoucher.narration || '')
-      setReferenceNo(editingVoucher.reference_no || '')
-      setPaidAmount(Number(editingVoucher.paid_amount) || 0)
-      setDirectAmount(Number(editingVoucher.amount) || 0)
-      setDebitLedgerId(editingVoucher.debit_ledger_id || '')
-      setCreditLedgerId(editingVoucher.credit_ledger_id || '')
+    async function loadData() {
+      try {
+        const [mats, pts, vouchers] = await Promise.all([
+          accDb.materials.toArray(),
+          accDb.parties.toArray(),
+          accDb.vouchers.toArray(),
+        ])
+        if (!active) return
 
-      if (Array.isArray(editingVoucher.items) && editingVoucher.items.length > 0) {
-        setItems(editingVoucher.items.map((it) => ({
-          ...it,
-          amount: (Number(it.qty) || 0) * (Number(it.rate) || 0),
-        })))
-      } else {
-        setItems([{ material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }])
+        setMaterials(mats)
+        setParties(pts)
+
+        if (editingVoucher) {
+          setVoucherNo(editingVoucher.voucher_no || '')
+          setDate(editingVoucher.date || new Date().toISOString().slice(0, 10))
+          setPartyName(editingVoucher.party_name || '')
+          setPartyPhone(editingVoucher.party_phone || editingVoucher.phone || '')
+          setPaymentMode(editingVoucher.payment_mode || 'Cash')
+          setNarration(editingVoucher.narration || '')
+          setPaidAmount(Number(editingVoucher.paid_amount) || 0)
+          setIsCustomPaid(true)
+
+          if (Array.isArray(editingVoucher.items) && editingVoucher.items.length > 0) {
+            setItems(
+              editingVoucher.items.map((it) => ({
+                material_id: it.material_id ? String(it.material_id) : '',
+                sku: it.sku || '',
+                name: it.name || '',
+                qty: Math.max(1, Number(it.qty) || 1),
+                rate: Number(it.rate) || 0,
+                cost_rate: Number(it.cost_rate) || 0,
+                unit: it.unit || 'pcs',
+                amount: (Number(it.qty) || 1) * (Number(it.rate) || 0),
+              }))
+            )
+          }
+        } else {
+          // Auto-generate next invoice number (e.g., INV-0413)
+          const invNums = vouchers
+            .map((v) => {
+              const match = String(v.voucher_no || '').match(/INV-(\d+)/)
+              return match ? parseInt(match[1], 10) : 0
+            })
+            .filter((n) => !isNaN(n))
+          const maxNum = invNums.length > 0 ? Math.max(...invNums) : 412
+          const nextInvNo = `INV-0${maxNum + 1}`
+
+          setVoucherNo(nextInvNo)
+          setDate(new Date().toISOString().slice(0, 10))
+          setPartyName('')
+          setPartyPhone('')
+          setPaymentMode('Cash')
+          setNarration('')
+          setDiscountVal(0)
+          setTaxPercent(0)
+          setIsCustomPaid(false)
+
+          // Preload first item from inventory
+          const firstMat = mats[0]
+          if (firstMat) {
+            const initialQty = 1
+            const initialRate = Number(firstMat.sales_rate) || 0
+            const initialTotal = initialQty * initialRate
+            setItems([
+              {
+                material_id: String(firstMat.id),
+                sku: firstMat.sku || '',
+                name: firstMat.name || '',
+                qty: initialQty,
+                rate: initialRate,
+                cost_rate: Number(firstMat.purchase_rate) || 0,
+                unit: firstMat.unit || 'pcs',
+                amount: initialTotal,
+              },
+            ])
+            setPaidAmount(initialTotal)
+          } else {
+            setItems([
+              {
+                material_id: '',
+                sku: '',
+                name: '',
+                qty: 1,
+                rate: 0,
+                cost_rate: 0,
+                unit: 'pcs',
+                amount: 0,
+              },
+            ])
+            setPaidAmount(0)
+          }
+          setError('')
+        }
+      } catch (err) {
+        console.warn('Error loading masters for invoice form:', err)
       }
-    } else {
-      // Reset defaults
-      setVoucherType('sales')
-      setVoucherNo(`INV-${Date.now().toString().slice(-5)}`)
-      setDate(new Date().toISOString().slice(0, 10))
-      setPartyName('')
-      setPartyPhone('')
-      setPaymentMode('HDFC Bank')
-      setNarration('')
-      setReferenceNo('')
-      setPaidAmount(0)
-      setDirectAmount(0)
-      setDebitLedgerId('')
-      setCreditLedgerId('')
-      setItems([{ material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }])
-      setError(null)
     }
-  }, [editingVoucher, isOpen])
 
-  async function loadMasters() {
-    const mats = await accDb.materials.toArray()
-    const pts = await accDb.parties.toArray()
-    const ldgs = await accDb.ledgers.toArray()
-    setMaterials(mats)
-    setParties(pts)
-    setLedgers(ldgs)
+    loadData()
+    return () => {
+      active = false
+    }
+  }, [isOpen, editingVoucher])
+
+  // Calculation helpers
+  const subtotal = useMemo(() => {
+    return items.reduce((acc, it) => acc + (Number(it.amount) || 0), 0)
+  }, [items])
+
+  const discountAmount = useMemo(() => {
+    const val = Number(discountVal) || 0
+    if (val <= 0) return 0
+    if (discountType === 'percent') {
+      return (subtotal * val) / 100
+    }
+    return Math.min(subtotal, val)
+  }, [subtotal, discountVal, discountType])
+
+  const taxableAmount = useMemo(() => {
+    return Math.max(0, subtotal - discountAmount)
+  }, [subtotal, discountAmount])
+
+  const taxAmount = useMemo(() => {
+    if (!taxPercent || taxPercent <= 0) return 0
+    return (taxableAmount * taxPercent) / 100
+  }, [taxableAmount, taxPercent])
+
+  const totalAmount = useMemo(() => {
+    return Math.round(taxableAmount + taxAmount)
+  }, [taxableAmount, taxAmount])
+
+  const dueAmount = useMemo(() => {
+    return Math.max(0, totalAmount - (Number(paidAmount) || 0))
+  }, [totalAmount, paidAmount])
+
+  // Auto-update paid amount when total changes (unless user manually entered partial amount or selected Credit)
+  useEffect(() => {
+    if (paymentMode === 'Credit') {
+      setPaidAmount(0)
+    } else if (!isCustomPaid) {
+      setPaidAmount(totalAmount)
+    }
+  }, [totalAmount, paymentMode, isCustomPaid])
+
+  // Matched customer for permanent UID and prior balance
+  const matchedCustomer = useMemo(() => {
+    if (!partyName.trim()) return null
+    return parties.find(
+      (p) => p.name.trim().toLowerCase() === partyName.trim().toLowerCase()
+    )
+  }, [parties, partyName])
+
+  // Customer suggestions filter
+  useEffect(() => {
+    if (!partyName.trim()) {
+      setCustomerSuggestions([])
+      return
+    }
+    const q = partyName.toLowerCase()
+    const matches = parties.filter((p) => p.name.toLowerCase().includes(q))
+    setCustomerSuggestions(matches)
+  }, [partyName, parties])
+
+  const handleSelectCustomer = (cust) => {
+    setPartyName(cust.name)
+    if (cust.phone) setPartyPhone(cust.phone)
+    setShowSuggestions(false)
   }
 
-  // Calculate items total
-  const itemsTotal = items.reduce((acc, it) => acc + (Number(it.amount) || 0), 0)
-  const totalAmount = voucherType === 'sales' || voucherType === 'purchase' ? itemsTotal : Number(directAmount) || 0
-  const dueAmount = Math.max(0, totalAmount - Number(paidAmount || 0))
-
-  // Find if current party has permanent UID
-  const matchedParty = parties.find(
-    (p) => p.name.trim().toLowerCase() === partyName.trim().toLowerCase()
-  )
-  const existingPartyUid = matchedParty?.uid || null
-
-  // Handle line item changes
-  function updateItem(index, field, value) {
-    const newItems = [...items]
-    const item = { ...newItems[index], [field]: value }
+  // Handle line item updates
+  const updateItem = (index, field, value) => {
+    const updated = [...items]
+    const item = { ...updated[index], [field]: value }
 
     if (field === 'material_id') {
       const mat = materials.find((m) => String(m.id) === String(value))
       if (mat) {
-        item.sku = mat.sku
-        item.name = mat.name
+        item.sku = mat.sku || ''
+        item.name = mat.name || ''
         item.unit = mat.unit || 'pcs'
+        item.rate = Number(mat.sales_rate) || 0
         item.cost_rate = Number(mat.purchase_rate) || 0
-        item.rate = voucherType === 'purchase' ? Number(mat.purchase_rate) || 0 : Number(mat.sales_rate) || 0
       }
     }
 
-    if (field === 'qty' || field === 'rate' || field === 'material_id') {
-      const q = Number(field === 'qty' ? value : item.qty) || 0
-      const r = Number(field === 'rate' ? value : item.rate) || 0
-      item.amount = q * r
-    }
+    const q = Math.max(1, Number(field === 'qty' ? value : item.qty) || 1)
+    const r = Math.max(0, Number(field === 'rate' ? value : item.rate) || 0)
+    item.qty = q
+    item.rate = r
+    item.amount = q * r
 
-    newItems[index] = item
-    setItems(newItems)
-
-    // Auto set paid amount if user hasn't modified it
-    if (!editingVoucher && paidAmount === 0 && (field === 'qty' || field === 'rate')) {
-      const newTotal = newItems.reduce((acc, it) => acc + (Number(it.amount) || 0), 0)
-      // default paid amount to 0 (credit) or full
-    }
+    updated[index] = item
+    setItems(updated)
   }
 
-  function addItem() {
+  const changeQty = (index, delta) => {
+    const current = Number(items[index]?.qty) || 1
+    const newQty = Math.max(1, current + delta)
+    updateItem(index, 'qty', newQty)
+  }
+
+  const addItem = () => {
+    const defaultMat = materials.find((m) => !items.some((it) => it.material_id === String(m.id))) || materials[0]
     setItems([
       ...items,
-      { material_id: '', sku: '', name: '', qty: 1, rate: 0, cost_rate: 0, unit: 'pcs', amount: 0 }
+      {
+        material_id: defaultMat ? String(defaultMat.id) : '',
+        sku: defaultMat ? defaultMat.sku || '' : '',
+        name: defaultMat ? defaultMat.name || '' : '',
+        qty: 1,
+        rate: defaultMat ? Number(defaultMat.sales_rate) || 0 : 0,
+        cost_rate: defaultMat ? Number(defaultMat.purchase_rate) || 0 : 0,
+        unit: defaultMat ? defaultMat.unit || 'pcs' : 'pcs',
+        amount: defaultMat ? Number(defaultMat.sales_rate) || 0 : 0,
+      },
     ])
   }
 
-  function removeItem(index) {
+  const removeItem = (index) => {
     if (items.length <= 1) return
     setItems(items.filter((_, i) => i !== index))
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (isOwner) {
-      alert('Owner account is in Read and Track mode. Only Admin has full data entry access.')
+  const handlePaymentModeSelect = (mode) => {
+    setPaymentMode(mode)
+    if (mode === 'Credit') {
+      setIsCustomPaid(true)
+      setPaidAmount(0)
+    } else if (mode === 'Partial') {
+      setIsCustomPaid(true)
+      // default half upfront
+      setPaidAmount(Math.round(totalAmount / 2))
+    } else {
+      setIsCustomPaid(false)
+      setPaidAmount(totalAmount)
+    }
+  }
+
+  const handleSaveInternal = async (printAfterSave = false) => {
+    setError('')
+
+    if (!partyName.trim()) {
+      setError('Please enter or select a customer name.')
       return
     }
 
-    if (!partyName && (voucherType === 'sales' || voucherType === 'purchase' || voucherType === 'receipt' || voucherType === 'payment')) {
-      setError('Please select or enter Party Name')
-      return
-    }
-
-    if ((voucherType === 'sales' || voucherType === 'purchase') && itemsTotal <= 0) {
-      setError('Please select at least one material with a valid quantity and rate')
+    if (totalAmount <= 0) {
+      setError('Please add at least one line item with a price greater than ₹0.')
       return
     }
 
     setLoading(true)
-    setError(null)
-
     try {
-      const voucherPayload = {
-        voucher_type: voucherType,
-        voucher_no: voucherNo || `VCH-${Date.now().toString().slice(-6)}`,
+      const payload = {
+        voucher_type: 'sales',
+        voucher_no: voucherNo.trim() || `INV-${Date.now().toString().slice(-4)}`,
         date,
         party_name: partyName.trim(),
         party_phone: partyPhone.trim(),
+        phone: partyPhone.trim(),
+        party_uid: matchedCustomer?.uid || null,
         payment_mode: paymentMode,
-        narration: narration.trim(),
-        reference_no: referenceNo.trim(),
+        status: dueAmount > 0 ? 'Due' : 'Paid',
+        subtotal,
+        discount_amount: discountAmount,
+        tax_amount: taxAmount,
         amount: totalAmount,
-        paid_amount: voucherType === 'sales' || voucherType === 'purchase' ? Number(paidAmount) || 0 : totalAmount,
-        due_amount: voucherType === 'sales' || voucherType === 'purchase' ? dueAmount : 0,
-        debit_ledger_id: debitLedgerId || null,
-        credit_ledger_id: creditLedgerId || null,
-        items: voucherType === 'sales' || voucherType === 'purchase' ? items : [],
+        paid_amount: Number(paidAmount) || 0,
+        due_amount: dueAmount,
+        narration: narration.trim() || (dueAmount > 0 ? 'Credit invoice' : 'Full settlement invoice'),
+        items: items.map((it) => ({
+          material_id: it.material_id ? Number(it.material_id) : null,
+          sku: it.sku || '',
+          name: it.name || 'Custom item',
+          qty: Number(it.qty) || 1,
+          rate: Number(it.rate) || 0,
+          cost_rate: Number(it.cost_rate) || 0,
+          unit: it.unit || 'pcs',
+          amount: (Number(it.qty) || 1) * (Number(it.rate) || 0),
+        })),
       }
 
+      let savedRecord
       if (editingVoucher?.id) {
-        await updateVoucher(editingVoucher.id, voucherPayload)
+        savedRecord = await updateVoucher(editingVoucher.id, payload)
       } else {
-        await createVoucher(voucherPayload)
+        savedRecord = await createVoucher(payload)
       }
 
-      setLoading(false)
-      onSuccess?.()
+      window.dispatchEvent(new Event('accounting-data-updated'))
+
+      if (printAfterSave && onSaveAndPrint) {
+        onSaveAndPrint(savedRecord || payload)
+      } else if (onSuccess) {
+        onSuccess(savedRecord || payload)
+      }
+
       onClose()
     } catch (err) {
-      console.error(err)
-      setError(err.message || 'Failed to save voucher')
+      console.error('Save invoice error:', err)
+      setError(err.message || 'Failed to save sales invoice.')
+    } finally {
       setLoading(false)
     }
   }
@@ -235,437 +376,578 @@ export default function VoucherModal({ isOpen, onClose, editingVoucher = null, o
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 15 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 15 }}
-        className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92vh] flex flex-col font-sans"
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-2xl rounded-3xl border border-[#dce5df] bg-white p-5 sm:p-7 shadow-[0_24px_70px_rgba(14,101,93,0.2)] my-auto max-h-[96vh] flex flex-col font-sans"
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Header with Tally Voucher Types */}
-        <div className="bg-slate-900 text-white p-4 sm:p-5 flex items-center justify-between border-b border-slate-800 shrink-0">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold uppercase tracking-wider bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                Tally Accounting Engine
-              </span>
-              {isOwner && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                  Read & Track Only (Owner)
-                </span>
-              )}
+        {/* Header - PDF Pine Green Aesthetic */}
+        <div className="flex items-center justify-between pb-4 border-b border-[#edf3f0] shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#0e655d] text-white shadow-xs shrink-0">
+              <Receipt size={22} strokeWidth={2.3} />
             </div>
-            <h2 className="text-xl font-bold text-white mt-1">
-              {editingVoucher ? `Modify Voucher: ${editingVoucher.voucher_no}` : 'Create New Accounting Voucher'}
-            </h2>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-[19px] font-extrabold tracking-tight text-[#11382f]">
+                  {editingVoucher ? 'Edit Sales Invoice' : 'New Sales Invoice'}
+                </h3>
+                <span className="rounded-lg bg-[#e3f4ee] px-2.5 py-0.5 font-mono text-[11px] font-extrabold text-[#0e655d]">
+                  {voucherNo}
+                </span>
+              </div>
+              <p className="text-xs text-[#6e8a81]">
+                Quick billing with live inventory deduction &amp; automatic dues tracking
+              </p>
+            </div>
           </div>
+
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="grid h-9 w-9 place-items-center rounded-xl text-[#6d8a81] hover:bg-[#f0f6f3] hover:text-[#11382f] transition"
+            aria-label="Close modal"
           >
-            <X className="w-5 h-5" />
+            <X size={19} />
           </button>
         </div>
 
-        {/* Voucher Type Tabs (Sales F8, Purchase F9, Receipt F6, Payment F5, Contra F4, Journal F7) */}
-        {!editingVoucher && (
-          <div className="bg-slate-100 p-2 border-b border-slate-200 flex flex-wrap gap-1.5 shrink-0">
-            {VOUCHER_TYPES.map((vt) => (
+        {/* Scrollable Form Body */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            handleSaveInternal(false)
+          }}
+          className="mt-4 space-y-4 overflow-y-auto pr-1 flex-1 text-slate-800"
+        >
+          {/* Top Row: Invoice Number & Date */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-[#143d35] mb-1">
+                Invoice Number
+              </label>
+              <div className="flex items-center gap-2 rounded-2xl border border-[#d8e3de] bg-[#f8faf9] px-3.5 py-2.5 focus-within:border-[#0e655d] focus-within:bg-white transition">
+                <Hash size={15} className="text-[#78968d] shrink-0" />
+                <input
+                  type="text"
+                  required
+                  value={voucherNo}
+                  onChange={(e) => setVoucherNo(e.target.value)}
+                  className="w-full bg-transparent font-mono text-xs font-extrabold text-[#11382f] outline-none"
+                  placeholder="INV-0413"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[#143d35] mb-1">
+                Invoice Date
+              </label>
+              <div className="flex items-center gap-2 rounded-2xl border border-[#d8e3de] bg-[#f8faf9] px-3.5 py-2.5 focus-within:border-[#0e655d] focus-within:bg-white transition">
+                <Calendar size={15} className="text-[#78968d] shrink-0" />
+                <input
+                  type="date"
+                  required
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full bg-transparent text-xs font-bold text-[#11382f] outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Customer / Debtor Selection Card */}
+          <div className="rounded-2xl border border-[#e1e9e3] bg-[#fafcfb] p-3.5 sm:p-4 relative">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-extrabold text-[#143d35] flex items-center gap-1.5">
+                <User size={15} className="text-[#0e655d]" />
+                Customer Details <span className="text-[#c25e19]">*</span>
+              </label>
+
+              {matchedCustomer && (
+                <div className="flex items-center gap-2">
+                  {matchedCustomer.uid && (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-[#e3f4ee] px-2 py-0.5 font-mono text-[10px] font-extrabold text-[#0e655d]">
+                      <BadgeCheck size={12} /> {matchedCustomer.uid}
+                    </span>
+                  )}
+                  {Number(matchedCustomer.current_balance) > 0 && (
+                    <span className="rounded-md bg-[#fef1ec] px-2 py-0.5 text-[10px] font-extrabold text-[#c25e19]">
+                      Owes: ₹{Number(matchedCustomer.current_balance).toLocaleString('en-IN')}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Name Input with Autocomplete */}
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  placeholder="Enter or search customer name"
+                  value={partyName}
+                  onFocus={() => setShowSuggestions(true)}
+                  onChange={(e) => {
+                    setPartyName(e.target.value)
+                    setShowSuggestions(true)
+                  }}
+                  className="w-full rounded-xl border border-[#d8e3de] bg-white px-3.5 py-2.5 text-xs font-bold text-[#11382f] outline-none focus:border-[#0e655d] placeholder:font-normal placeholder:text-[#8ea59d] transition"
+                />
+
+                {/* Suggestions Dropdown */}
+                {showSuggestions && customerSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-30 max-h-48 overflow-y-auto rounded-xl border border-[#d8e3de] bg-white p-1 shadow-lg">
+                    {customerSuggestions.map((c) => (
+                      <button
+                        key={c.id || c.name}
+                        type="button"
+                        onClick={() => handleSelectCustomer(c)}
+                        className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-left text-xs hover:bg-[#eef7f3] transition"
+                      >
+                        <span className="font-bold text-[#11382f]">{c.name}</span>
+                        <div className="flex items-center gap-2 text-[10px] text-[#6e8a81]">
+                          {c.uid && <span className="font-mono text-[#0e655d]">{c.uid}</span>}
+                          {Number(c.current_balance) > 0 && (
+                            <span className="text-[#c25e19] font-bold">
+                              ₹{Number(c.current_balance).toLocaleString('en-IN')}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Phone / WhatsApp Input */}
+              <div className="flex items-center gap-2 rounded-xl border border-[#d8e3de] bg-white px-3 py-2 focus-within:border-[#0e655d] transition">
+                <Phone size={14} className="text-[#78968d] shrink-0" />
+                <input
+                  type="tel"
+                  placeholder="+91 98765 43210 (WhatsApp invoice)"
+                  value={partyPhone}
+                  onChange={(e) => setPartyPhone(e.target.value)}
+                  className="w-full bg-transparent text-xs font-semibold text-[#11382f] outline-none placeholder:font-normal placeholder:text-[#8ea59d]"
+                />
+              </div>
+            </div>
+
+            {/* Quick Customer Selection Chips from PDF */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-[#7c968e] mr-1">Frequent:</span>
+              {[
+                { name: 'Rahul Mobile Hub', phone: '+919876543210' },
+                { name: 'City Gadget Point', phone: '+919811234567' },
+                { name: 'Sen Telecom', phone: '+919830123456' },
+                { name: 'Mitra Cover House', phone: '+919845098765' },
+                { name: 'Walk-in customer', phone: '' },
+              ].map((cust) => (
+                <button
+                  key={cust.name}
+                  type="button"
+                  onClick={() => handleSelectCustomer(cust)}
+                  className={`rounded-lg px-2 py-0.5 text-[11px] font-bold transition ${
+                    partyName === cust.name
+                      ? 'bg-[#0e655d] text-white shadow-2xs'
+                      : 'border border-[#d8e3de] bg-white text-[#44655b] hover:bg-[#edf5f1]'
+                  }`}
+                >
+                  {cust.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Line Items Table / Products */}
+          <div className="rounded-2xl border border-[#e1e9e3] bg-[#fafcfb] p-3.5 sm:p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-extrabold text-[#11382f] flex items-center gap-1.5">
+                <Box size={15} className="text-[#0e655d]" />
+                Invoice Items ({items.length})
+              </span>
               <button
-                key={vt.id}
                 type="button"
-                onClick={() => {
-                  setVoucherType(vt.id)
-                  setError(null)
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  voucherType === vt.id
-                    ? `${vt.color} shadow-xs scale-102`
-                    : 'bg-white text-slate-700 hover:bg-slate-200/80 border border-slate-200'
+                onClick={addItem}
+                className="inline-flex items-center gap-1 rounded-xl bg-[#0e655d] px-3 py-1 text-[11px] font-extrabold text-white hover:bg-[#0a4e47] transition shadow-2xs active:scale-98"
+              >
+                <Plus size={13} /> Add item
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {items.map((it, idx) => {
+                const selectedMat = materials.find((m) => String(m.id) === String(it.material_id))
+                const currentStock = selectedMat ? selectedMat.current_qty : null
+
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-2xl border border-[#e2e9e4] bg-white p-3 shadow-2xs transition hover:border-[#ccdcd2]"
+                  >
+                    <div className="grid grid-cols-12 gap-2 items-center">
+                      {/* Product Selection */}
+                      <div className="col-span-12 sm:col-span-5">
+                        <select
+                          value={it.material_id}
+                          onChange={(e) => updateItem(idx, 'material_id', e.target.value)}
+                          className="w-full rounded-xl border border-[#d8e3de] bg-[#fafcfb] px-3 py-2 text-xs font-bold text-[#11382f] outline-none focus:border-[#0e655d]"
+                        >
+                          <option value="">-- Select Inventory Product --</option>
+                          {materials.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} · ({m.current_qty} {m.unit || 'pcs'} stock · ₹{m.sales_rate})
+                            </option>
+                          ))}
+                        </select>
+                        {selectedMat && (
+                          <div className="mt-1 flex items-center gap-2 text-[10px] text-[#6d8a80]">
+                            <span>SKU: {selectedMat.sku || 'N/A'}</span>
+                            <span
+                              className={`font-bold ${
+                                currentStock <= (selectedMat.reorder_level || 10)
+                                  ? 'text-[#c25e19]'
+                                  : 'text-[#0d786d]'
+                              }`}
+                            >
+                              Stock: {currentStock} {selectedMat.unit || 'pcs'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quantity with + / - controls */}
+                      <div className="col-span-5 sm:col-span-3">
+                        <label className="block text-[10px] font-bold text-[#748f86] mb-0.5">
+                          Quantity ({it.unit || 'pcs'})
+                        </label>
+                        <div className="flex items-center rounded-xl border border-[#d8e3de] bg-[#fafcfb] overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => changeQty(idx, -1)}
+                            className="grid h-8 w-8 place-items-center text-[#55736a] hover:bg-[#eaf3ef] transition"
+                            title="Decrease quantity"
+                          >
+                            <Minus size={13} />
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            value={it.qty}
+                            onChange={(e) => updateItem(idx, 'qty', e.target.value)}
+                            className="w-full bg-transparent text-center text-xs font-extrabold text-[#11382f] outline-none py-1"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => changeQty(idx, 1)}
+                            className="grid h-8 w-8 place-items-center text-[#55736a] hover:bg-[#eaf3ef] transition"
+                            title="Increase quantity"
+                          >
+                            <Plus size={13} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Selling Price / Rate */}
+                      <div className="col-span-4 sm:col-span-2">
+                        <label className="block text-[10px] font-bold text-[#748f86] mb-0.5">
+                          Rate (₹)
+                        </label>
+                        <div className="flex items-center rounded-xl border border-[#d8e3de] bg-[#fafcfb] px-2 py-1.5 focus-within:border-[#0e655d] focus-within:bg-white transition">
+                          <span className="text-[11px] text-[#78968d] font-bold mr-0.5">₹</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={it.rate}
+                            onChange={(e) => updateItem(idx, 'rate', e.target.value)}
+                            className="w-full bg-transparent text-xs font-extrabold text-[#11382f] outline-none text-right"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Item Total & Delete */}
+                      <div className="col-span-3 sm:col-span-2 flex items-center justify-end gap-2 pl-1">
+                        <div className="text-right">
+                          <span className="block text-[10px] text-[#748f86]">Total</span>
+                          <strong className="text-xs font-extrabold text-[#11382f]">
+                            ₹{(Number(it.amount) || 0).toLocaleString('en-IN')}
+                          </strong>
+                        </div>
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem(idx)}
+                            className="grid h-7 w-7 place-items-center rounded-lg text-[#9cb0a8] hover:bg-[#fdeeed] hover:text-[#ba3b2a] transition"
+                            title="Remove item"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Bill Summary Breakdown */}
+            <div className="mt-3.5 space-y-2 pt-3 border-t border-[#e2e9e4]">
+              {/* Subtotal */}
+              <div className="flex items-center justify-between text-xs text-[#5e7c73]">
+                <span>Items Subtotal</span>
+                <span className="font-bold text-[#11382f]">₹{subtotal.toLocaleString('en-IN')}</span>
+              </div>
+
+              {/* Discount Row */}
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[#5e7c73]">Discount:</span>
+                  <div className="flex items-center rounded-lg border border-[#d8e3de] bg-white px-2 py-0.5">
+                    <input
+                      type="number"
+                      min="0"
+                      value={discountVal || ''}
+                      placeholder="0"
+                      onChange={(e) => setDiscountVal(Number(e.target.value) || 0)}
+                      className="w-14 text-xs font-bold text-[#11382f] outline-none text-right bg-transparent"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setDiscountType(discountType === 'flat' ? 'percent' : 'flat')}
+                      className="ml-1 text-[10px] font-extrabold text-[#0e655d]"
+                    >
+                      {discountType === 'flat' ? '₹ Flat' : '% Off'}
+                    </button>
+                  </div>
+                </div>
+                <span className="font-bold text-[#c25e19]">
+                  {discountAmount > 0 ? `- ₹${discountAmount.toLocaleString('en-IN')}` : '₹0'}
+                </span>
+              </div>
+
+              {/* Tax / GST Row */}
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[#5e7c73]">GST / Tax:</span>
+                  <div className="flex items-center gap-1">
+                    {[0, 5, 12, 18].map((pct) => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => setTaxPercent(pct)}
+                        className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold transition ${
+                          taxPercent === pct
+                            ? 'bg-[#0e655d] text-white'
+                            : 'bg-white border border-[#d8e3de] text-[#44655b] hover:bg-[#edf5f1]'
+                        }`}
+                      >
+                        {pct === 0 ? 'None' : `${pct}%`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <span className="font-bold text-[#11382f]">
+                  {taxAmount > 0 ? `+ ₹${taxAmount.toLocaleString('en-IN')}` : '₹0'}
+                </span>
+              </div>
+
+              {/* Grand Total Banner */}
+              <div className="flex items-center justify-between rounded-2xl bg-[#0e655d] px-4 py-3 text-white shadow-xs">
+                <div>
+                  <span className="text-[11px] font-medium text-[#c4e4dc] uppercase tracking-wider block">
+                    Grand Total
+                  </span>
+                  <span className="text-xs text-[#dff1ec]">
+                    {items.length} line {items.length === 1 ? 'item' : 'items'}
+                  </span>
+                </div>
+                <strong className="text-xl sm:text-2xl font-extrabold tracking-tight">
+                  ₹{totalAmount.toLocaleString('en-IN')}
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Payment & Settlement Card */}
+          <div className="rounded-2xl border border-[#e1e9e3] bg-white p-4 space-y-3 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold text-[#11382f] flex items-center gap-1.5">
+                <CreditCard size={15} className="text-[#0e655d]" />
+                Payment Mode &amp; Settlement
+              </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
+                  dueAmount > 0
+                    ? 'bg-[#fef3eb] text-[#c25e19]'
+                    : 'bg-[#e2f3ec] text-[#0d786d]'
                 }`}
               >
-                <span>{vt.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
+                {dueAmount > 0 ? `Due: ₹${dueAmount.toLocaleString('en-IN')}` : 'Paid in Full'}
+              </span>
+            </div>
 
-        {/* Body Form */}
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
+            {/* Payment Mode Chips */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {[
+                { id: 'Cash', label: 'Cash (Full)' },
+                { id: 'UPI', label: 'UPI / QR' },
+                { id: 'HDFC Bank', label: 'Bank / NEFT' },
+                { id: 'Credit', label: 'Credit (Due)' },
+                { id: 'Partial', label: 'Split / Partial' },
+              ].map((pm) => (
+                <button
+                  key={pm.id}
+                  type="button"
+                  onClick={() => handlePaymentModeSelect(pm.id)}
+                  className={`rounded-xl py-2 px-1 text-xs font-bold transition text-center ${
+                    paymentMode === pm.id
+                      ? 'bg-[#0e655d] text-white shadow-2xs'
+                      : 'border border-[#d8e3de] bg-[#f8faf9] text-[#44655b] hover:bg-[#eef7f3]'
+                  }`}
+                >
+                  {pm.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Paid Amount vs Balance Due */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-[#143d35]">
+                    Amount Received Upfront
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomPaid(false)
+                      setPaidAmount(totalAmount)
+                      setPaymentMode('Cash')
+                    }}
+                    className="text-[10px] font-bold text-[#0e655d] hover:underline"
+                  >
+                    Set Full
+                  </button>
+                </div>
+                <div className="flex items-center gap-1 rounded-xl border border-[#d8e3de] px-3 py-2 bg-[#fafcfb] focus-within:border-[#0e655d] focus-within:bg-white transition">
+                  <span className="text-xs text-[#718d84] font-bold">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max={totalAmount}
+                    value={paidAmount}
+                    onChange={(e) => {
+                      setIsCustomPaid(true)
+                      setPaidAmount(Number(e.target.value) || 0)
+                    }}
+                    className="w-full bg-transparent text-xs font-extrabold text-[#11382f] outline-none text-right"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#143d35] mb-1">
+                  Closing Balance Outstanding
+                </label>
+                <div className="flex items-center justify-between rounded-xl border border-[#d8e3de] px-3 py-2 bg-[#fafcfb]">
+                  <strong
+                    className={`text-xs font-extrabold ${
+                      dueAmount > 0 ? 'text-[#c25e19]' : 'text-[#0e655d]'
+                    }`}
+                  >
+                    ₹{dueAmount.toLocaleString('en-IN')}
+                  </strong>
+                  <span
+                    className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                      dueAmount > 0
+                        ? 'bg-[#fef1ec] text-[#c25e19]'
+                        : 'bg-[#e2f3ec] text-[#0d786d]'
+                    }`}
+                  >
+                    {dueAmount > 0 ? 'Credit Dues' : 'Settled'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {dueAmount > 0 && (
+              <p className="text-[11px] text-[#6d8a80] leading-relaxed bg-[#f8fbf9] p-2.5 rounded-xl border border-[#e1ece6]">
+                💡 Outstanding balance of <strong>₹{dueAmount.toLocaleString('en-IN')}</strong> will automatically appear in <strong>Debtors</strong> aging and the evening WhatsApp summary.
+              </p>
+            )}
+          </div>
+
+          {/* Narration / Notes */}
+          <div>
+            <label className="block text-xs font-bold text-[#143d35] mb-1">
+              Invoice Remarks / Footer Note
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Thank you for your business! Delivered via counter."
+              value={narration}
+              onChange={(e) => setNarration(e.target.value)}
+              className="w-full rounded-2xl border border-[#d8e3de] bg-[#fafcfb] px-3.5 py-2.5 text-xs font-medium text-[#11382f] outline-none focus:border-[#0e655d] focus:bg-white transition"
+            />
+          </div>
+
+          {/* Error Message */}
           {error && (
-            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <div className="flex items-center gap-2 rounded-2xl border border-[#f5d0c8] bg-[#fff4f2] p-3 text-xs font-semibold text-[#b43c29]">
+              <AlertCircle size={15} className="shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
-          {/* Top Fields: Voucher No, Date, Reference */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Voucher No</label>
-              <div className="relative">
-                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  value={voucherNo}
-                  onChange={(e) => setVoucherNo(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  placeholder="e.g. INV-001"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                />
-              </div>
+          {/* Footer Actions */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#edf3f0] shrink-0">
+            <div className="w-full sm:w-auto">
+              <span className="block text-[11px] text-[#6d8a80]">Payable Amount</span>
+              <strong className="text-lg font-extrabold text-[#11382f]">
+                ₹{totalAmount.toLocaleString('en-IN')}
+              </strong>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Voucher Date</label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode / Bank</label>
-              <select
-                value={paymentMode}
-                onChange={(e) => setPaymentMode(e.target.value)}
-                disabled={isOwner}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-2xl border border-[#d6e2dd] bg-white px-4 py-2.5 text-xs font-bold text-[#55736a] hover:bg-[#f2f7f4] transition"
               >
-                <option value="HDFC Bank">HDFC Bank Current A/c</option>
-                <option value="State Bank of India">SBI Current A/c</option>
-                <option value="Cash">Cash in Hand</option>
-                <option value="Credit / Due">Credit / On Account</option>
-              </select>
-            </div>
-          </div>
+                Cancel
+              </button>
 
-          {/* Party Selection & Internal UID Notification */}
-          {(voucherType === 'sales' || voucherType === 'purchase' || voucherType === 'receipt' || voucherType === 'payment') && (
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <User className="w-4 h-4 text-blue-600" />
-                  <span>
-                    {voucherType === 'sales' || voucherType === 'receipt' ? 'Customer / Debtor Party' : 'Supplier / Creditor Party'}
-                  </span>
-                </label>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => handleSaveInternal(true)}
+                className="inline-flex items-center gap-1.5 rounded-2xl border border-[#0e655d] bg-[#f0f9f5] px-4 py-2.5 text-xs font-extrabold text-[#0e655d] hover:bg-[#e2f3ec] disabled:opacity-50 transition"
+              >
+                <Printer size={15} />
+                <span>Save &amp; Print</span>
+              </button>
 
-                {/* Live UID Indicator Badge */}
-                {voucherType === 'sales' && (
-                  <div className="text-[11px] font-semibold">
-                    {existingPartyUid ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
-                        <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Permanent UID: <strong>{existingPartyUid}</strong></span>
-                      </span>
-                    ) : dueAmount > 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
-                        <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Closing Due (₹{dueAmount.toLocaleString()}) → Auto assigns permanent UID</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Settled Upfront → Direct Sales (No UID)</span>
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <input
-                    type="text"
-                    list="party-suggestions"
-                    placeholder="Type or select customer/party name..."
-                    value={partyName}
-                    onChange={(e) => setPartyName(e.target.value)}
-                    disabled={isOwner}
-                    required
-                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                  />
-                  <datalist id="party-suggestions">
-                    {parties.map((p) => (
-                      <option key={p.id} value={p.name}>
-                        {p.uid ? `[${p.uid}] ` : ''}Due: ₹{Number(p.current_balance || 0).toLocaleString()}
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
-
-                <div>
-                  <input
-                    type="text"
-                    placeholder="Party Phone (optional)"
-                    value={partyPhone}
-                    onChange={(e) => setPartyPhone(e.target.value)}
-                    disabled={isOwner}
-                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Contra & Journal Ledger Pickers */}
-          {voucherType === 'contra' && (
-            <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-amber-900 mb-1">Source Account (Credit - From)</label>
-                <select
-                  value={creditLedgerId}
-                  onChange={(e) => setCreditLedgerId(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  <option value="">-- Select Source Ledger --</option>
-                  {ledgers.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.group}) - Bal: ₹{Number(l.current_balance || 0).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-amber-900 mb-1">Destination Account (Debit - To)</label>
-                <select
-                  value={debitLedgerId}
-                  onChange={(e) => setDebitLedgerId(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  <option value="">-- Select Destination Ledger --</option>
-                  {ledgers.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.group}) - Bal: ₹{Number(l.current_balance || 0).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Inventory Table for Sales & Purchase */}
-          {(voucherType === 'sales' || voucherType === 'purchase') && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                  <Package className="w-4 h-4 text-emerald-600" />
-                  <span>Material Line Items ({items.length})</span>
-                </span>
-                {!isOwner && (
-                  <button
-                    type="button"
-                    onClick={addItem}
-                    className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Item</span>
-                  </button>
-                )}
-              </div>
-
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-100/90 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200">
-                      <tr>
-                        <th className="py-2.5 px-3">Material / Item</th>
-                        <th className="py-2.5 px-3 w-24">Qty</th>
-                        <th className="py-2.5 px-3 w-20">Unit</th>
-                        <th className="py-2.5 px-3 w-28">Rate (₹)</th>
-                        <th className="py-2.5 px-3 w-32 text-right">Amount (₹)</th>
-                        {!isOwner && <th className="py-2.5 px-2 w-10 text-center"></th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {items.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/60">
-                          <td className="p-2 px-3">
-                            <select
-                              value={item.material_id}
-                              onChange={(e) => updateItem(idx, 'material_id', e.target.value)}
-                              disabled={isOwner}
-                              required
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-600 disabled:opacity-60"
-                            >
-                              <option value="">-- Choose Material --</option>
-                              {materials.map((m) => (
-                                <option key={m.id} value={m.id}>
-                                  {m.name} [Stock: {m.current_qty} {m.unit}] - ₹{voucherType === 'purchase' ? m.purchase_rate : m.sales_rate}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="p-2 px-3">
-                            <input
-                              type="number"
-                              min="0.01"
-                              step="any"
-                              value={item.qty}
-                              onChange={(e) => updateItem(idx, 'qty', e.target.value)}
-                              disabled={isOwner}
-                              required
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-600 text-right disabled:opacity-60"
-                            />
-                          </td>
-                          <td className="p-2 px-3 text-slate-500 font-medium">{item.unit || 'pcs'}</td>
-                          <td className="p-2 px-3">
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={item.rate}
-                              onChange={(e) => updateItem(idx, 'rate', e.target.value)}
-                              disabled={isOwner}
-                              required
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-600 text-right disabled:opacity-60"
-                            />
-                          </td>
-                          <td className="p-2 px-3 text-right font-bold text-slate-900">
-                            ₹{Number(item.amount || 0).toLocaleString()}
-                          </td>
-                          {!isOwner && (
-                            <td className="p-2 px-2 text-center">
-                              {items.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeItem(idx)}
-                                  className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
-                                  title="Remove item"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Total & Split Payment (Paid vs Due) */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="w-full sm:w-auto space-y-1">
-                  <div className="text-xs text-slate-500">Invoice Net Total</div>
-                  <div className="text-2xl font-black text-slate-900">
-                    ₹{itemsTotal.toLocaleString()}
-                  </div>
-                </div>
-
-                <div className="w-full sm:w-auto flex flex-wrap items-center gap-4">
-                  <div>
-                    <label className="block text-[11px] font-bold text-emerald-800 mb-0.5">Paid Upfront (₹)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={paidAmount}
-                      onChange={(e) => setPaidAmount(e.target.value)}
-                      disabled={isOwner}
-                      className="w-32 px-3 py-1.5 bg-white border border-emerald-300 rounded-lg text-xs font-bold text-emerald-900 text-right focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-rose-800 mb-0.5">Closing Due (Credit)</label>
-                    <div className="w-32 px-3 py-1.5 bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold text-rose-900 text-right">
-                      ₹{dueAmount.toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Direct Amount for Receipt, Payment, Contra, Journal */}
-          {(voucherType === 'receipt' || voucherType === 'payment' || voucherType === 'contra' || voucherType === 'journal') && (
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                Voucher Amount (₹)
-              </label>
-              <div className="relative max-w-xs">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="number"
-                  min="1"
-                  step="any"
-                  value={directAmount}
-                  onChange={(e) => setDirectAmount(e.target.value)}
-                  disabled={isOwner}
-                  required
-                  placeholder="0.00"
-                  className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-base font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Narration */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Narration / Remarks</label>
-            <textarea
-              rows={2}
-              value={narration}
-              onChange={(e) => setNarration(e.target.value)}
-              disabled={isOwner}
-              placeholder="e.g. Sold on 30-day credit terms, transport via SafeXpress"
-              className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
-            />
-          </div>
-
-          {/* Actions */}
-          <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
-            >
-              Cancel
-            </button>
-
-            {!isOwner ? (
               <button
                 type="submit"
                 disabled={loading}
-                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/30 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-2xl bg-[#0e655d] px-5 py-2.5 text-xs font-extrabold text-white shadow-xs hover:bg-[#094e48] disabled:opacity-50 transition active:scale-98"
               >
-                {loading ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>{editingVoucher ? 'Update Voucher' : 'Post Voucher (Save)'}</span>
-                  </>
-                )}
+                <CheckCircle2 size={15} />
+                {loading
+                  ? 'Saving Invoice…'
+                  : editingVoucher
+                  ? 'Update Invoice'
+                  : 'Save & Create Invoice'}
               </button>
-            ) : (
-              <div className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-200 text-slate-500 cursor-not-allowed">
-                Read-Only (Owner Mode)
-              </div>
-            )}
+            </div>
           </div>
         </form>
-      </motion.div>
+      </div>
     </div>
   )
 }

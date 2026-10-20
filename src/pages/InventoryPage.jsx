@@ -3,13 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
   Search,
-  Plus,
-  Box,
-  AlertTriangle,
-  CheckCircle,
-  SlidersHorizontal,
   X,
-  PackagePlus,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'

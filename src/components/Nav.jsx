@@ -21,6 +21,7 @@ import {
   FileSpreadsheet,
   Receipt,
   RotateCcw,
+  Plus,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import VoucherModal from './VoucherModal'
@@ -106,7 +107,16 @@ export default function Nav() {
         </div>
 
         {/* Navigation Groups */}
-        <div className="flex-1 overflow-y-auto space-y-6 pr-1">
+        <div className="flex-1 overflow-y-auto space-y-5 pr-1">
+          <button
+            type="button"
+            onClick={() => setVoucherOpen(true)}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-[#0f7d6f] hover:bg-[#139181] text-white py-2.5 px-3 text-xs font-extrabold shadow-sm transition active:scale-98"
+          >
+            <Plus size={16} strokeWidth={2.5} />
+            <span>+ New Invoice</span>
+          </button>
+
           <div>
             <p className="mb-2 px-3 text-[10px] font-extrabold tracking-[1.2px] text-[#78a89a]">
               OVERVIEW
@@ -263,6 +273,17 @@ export default function Nav() {
                 <RotateCcw size={18} /> Switch to Admin
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMoreOpen(false)
+                setVoucherOpen(true)
+              }}
+              className="mt-3 w-full flex items-center justify-center gap-2 rounded-2xl bg-[#0e655d] text-white p-3 text-xs font-extrabold shadow-xs transition active:scale-98"
+            >
+              <Plus size={16} strokeWidth={2.5} /> + Create New Sales Invoice
+            </button>
             <div className="mt-4 pt-3 border-t border-[#e5ece8] flex items-center justify-between">
               <span className="text-[11px] text-[#6e847c]">Logged in as Owner</span>
               <button
