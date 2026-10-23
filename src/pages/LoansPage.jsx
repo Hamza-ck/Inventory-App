@@ -1,30 +1,122 @@
-import { useState } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
-  Banknote,
-  Plus,
-  CreditCard,
-  Building2,
-  Calendar,
-  X,
-  CheckCircle,
+  FileSpreadsheet,
+  Edit3,
 } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
+import { accDb } from '../lib/accountingDb'
+import AdminEditModal from '../components/AdminEditModal'
+
+const DEFAULT_LOANS_OWED = [
+  {
+    id: 1,
+    name: 'Term loan',
+    amount: 400000,
+    note: 'EMI ₹18,500 due 5 Nov',
+  },
+  {
+    id: 2,
+    name: 'Vendor loan',
+    amount: 50000,
+    note: 'Repay by 30 Nov',
+  },
+]
+
+const DEFAULT_ADVANCES_GIVEN = [
+  {
+    id: 3,
+    name: 'Staff advances',
+    amount: 15000,
+    note: '3 people',
+  },
+  {
+    id: 4,
+    name: 'Supplier advance',
+    amount: 135000,
+    note: 'Metro Steel',
+  },
+]
 
 export default function LoansPage() {
-  const { isAdmin } = useAuth()
   const navigate = useNavigate()
-  const [modal, setModal] = useState(false)
-  const [entry, setEntry] = useState({ type: 'loan', name: '', amount: '', note: '' })
+  const [loansOwed, setLoansOwed] = useState(DEFAULT_LOANS_OWED)
+  const [advancesGiven, setAdvancesGiven] = useState(DEFAULT_ADVANCES_GIVEN)
+  const [editingLoan, setEditingLoan] = useState(null)
+
+  // Load from Dexie ledgers
+  const loadLoans = useCallback(async () => {
+    try {
+      const allLedgers = await accDb.ledgers.toArray()
+      const owed = allLedgers.filter((l) => (l.group || '').toLowerCase().includes('loans (liability)'))
+      const given = allLedgers.filter((l) => (l.group || '').toLowerCase().includes('loans & advances (asset)'))
+
+      if (owed.length > 0) {
+        setLoansOwed(
+          owed.map((l) => ({
+            id: l.id,
+            name: l.name,
+            amount: Number(l.current_balance) || 0,
+            note: l.note || '',
+          }))
+        )
+      } else {
+        setLoansOwed(DEFAULT_LOANS_OWED)
+      }
+
+      if (given.length > 0) {
+        setAdvancesGiven(
+          given.map((l) => ({
+            id: l.id,
+            name: l.name,
+            amount: Number(l.current_balance) || 0,
+            note: l.note || '',
+          }))
+        )
+      } else {
+        setAdvancesGiven(DEFAULT_ADVANCES_GIVEN)
+      }
+    } catch {
+      setLoansOwed(DEFAULT_LOANS_OWED)
+      setAdvancesGiven(DEFAULT_ADVANCES_GIVEN)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadLoans()
+    const onUpdate = () => loadLoans()
+    window.addEventListener('accounting-data-updated', onUpdate)
+    return () => window.removeEventListener('accounting-data-updated', onUpdate)
+  }, [loadLoans])
+
+  // Total Loans you owe
+  const totalLoansOwed = useMemo(() => {
+    return loansOwed.reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
+  }, [loansOwed])
+
+  // Total Advances given
+  const totalAdvancesGiven = useMemo(() => {
+    return advancesGiven.reduce((sum, a) => sum + (Number(a.amount) || 0), 0)
+  }, [advancesGiven])
+
+  // Net you owe
+  const netYouOwe = useMemo(() => {
+    return Math.max(0, totalLoansOwed - totalAdvancesGiven)
+  }, [totalLoansOwed, totalAdvancesGiven])
+
+  const formatAmount = (amt) => {
+    if (amt >= 100000) return `₹${(amt / 100000).toFixed(1)}L`
+    if (amt >= 1000) return `₹${(amt / 1000).toFixed(0)}K`
+    return `₹${amt}`
+  }
 
   return (
-    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10">
+    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10 font-sans">
       <Nav />
 
       <main className="mx-auto max-w-2xl px-4 pt-4 sm:px-6 sm:pt-6">
-        {/* Top Header with Back button (PDF Page 9) */}
+        {/* Top Header with Back button and "+ Record Entry" (PDF Page 9) */}
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button
@@ -40,15 +132,15 @@ export default function LoansPage() {
             </h1>
           </div>
 
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setModal(true)}
-              className="flex items-center gap-1.5 rounded-xl bg-[#0e655d] px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[#0a4f49] transition"
-            >
-              <Plus size={15} /> Record entry
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => navigate('/tally')}
+            className="flex items-center gap-1.5 rounded-2xl bg-[#0e655d] px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-[#0a4f49] transition active:scale-95"
+            title="Import vouchers & masters from Tally XML"
+          >
+            <FileSpreadsheet size={16} />
+            <span>Tally import</span>
+          </button>
         </header>
 
         {/* Featured Net You Owe Card (PDF Page 9) */}
@@ -57,7 +149,7 @@ export default function LoansPage() {
             Net you owe
           </span>
           <strong className="mt-2 block text-[38px] font-extrabold tracking-tight sm:text-[44px]">
-            ₹3.0L
+            {formatAmount(netYouOwe)}
           </strong>
         </div>
 
@@ -68,176 +160,93 @@ export default function LoansPage() {
               Loans you owe
             </h2>
             <strong className="text-[18px] font-extrabold text-[#c25e19]">
-              ₹4.5L
+              {formatAmount(totalLoansOwed)}
             </strong>
           </div>
 
           <div className="divide-y divide-[#edf3f0]">
-            {/* Term Loan */}
-            <div className="py-4 flex items-start justify-between">
-              <div>
-                <strong className="block text-sm font-extrabold text-[#11382f]">
-                  Term loan
+            {loansOwed.map((l) => (
+              <div key={l.id || l.name} className="py-4 flex items-start justify-between group">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <strong className="block text-sm font-extrabold text-[#11382f]">
+                      {l.name}
+                    </strong>
+                    <button
+                      type="button"
+                      onClick={() => setEditingLoan({ id: l.id, name: l.name, current_balance: l.amount, group: 'Loans (Liability)', note: l.note })}
+                      className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
+                      title="Admin Edit loan record"
+                    >
+                      <Edit3 size={11} />
+                      <span>Edit</span>
+                    </button>
+                  </div>
+                  {l.note && (
+                    <span className="mt-1 block text-xs text-[#718d84]">
+                      {l.note}
+                    </span>
+                  )}
+                </div>
+                <strong className="text-base font-extrabold text-[#11382f]">
+                  {formatAmount(l.amount)}
                 </strong>
-                <span className="mt-1 block text-xs text-[#718d84]">
-                  EMI ₹18,500 due 5 Nov
-                </span>
               </div>
-              <strong className="text-base font-extrabold text-[#11382f]">
-                ₹4.0L
-              </strong>
-            </div>
-
-            {/* Vendor Loan */}
-            <div className="pt-4 flex items-start justify-between">
-              <div>
-                <strong className="block text-sm font-extrabold text-[#11382f]">
-                  Vendor loan
-                </strong>
-                <span className="mt-1 block text-xs text-[#718d84]">
-                  Repay by 30 Nov
-                </span>
-              </div>
-              <strong className="text-base font-extrabold text-[#11382f]">
-                ₹0.5L
-              </strong>
-            </div>
+            ))}
           </div>
         </section>
 
         {/* Section 2: Advances given (PDF Page 9) */}
-        <section className="rounded-3xl border border-[#e1e9e3] border-l-4 border-l-[#0e655d] bg-white p-5 sm:p-6 shadow-xs">
+        <section className="rounded-3xl border border-[#e1e9e3] border-l-4 border-l-[#0b786e] bg-white p-5 sm:p-6 shadow-xs">
           <div className="flex items-center justify-between pb-4 border-b border-[#edf3f0]">
             <h2 className="text-[17px] font-extrabold text-[#11382f]">
               Advances given
             </h2>
             <strong className="text-[18px] font-extrabold text-[#0e655d]">
-              ₹1.5L
+              {formatAmount(totalAdvancesGiven)}
             </strong>
           </div>
 
           <div className="divide-y divide-[#edf3f0]">
-            {/* Staff Advances */}
-            <div className="py-4 flex items-start justify-between">
-              <div>
-                <strong className="block text-sm font-extrabold text-[#11382f]">
-                  Staff advances
+            {advancesGiven.map((a) => (
+              <div key={a.id || a.name} className="py-4 flex items-start justify-between group">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <strong className="block text-sm font-extrabold text-[#11382f]">
+                      {a.name}
+                    </strong>
+                    <button
+                      type="button"
+                      onClick={() => setEditingLoan({ id: a.id, name: a.name, current_balance: a.amount, group: 'Loans & Advances (Asset)', note: a.note })}
+                      className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
+                      title="Admin Edit advance record"
+                    >
+                      <Edit3 size={11} />
+                      <span>Edit</span>
+                    </button>
+                  </div>
+                  {a.note && (
+                    <span className="mt-1 block text-xs text-[#718d84]">
+                      {a.note}
+                    </span>
+                  )}
+                </div>
+                <strong className="text-base font-extrabold text-[#11382f]">
+                  {formatAmount(a.amount)}
                 </strong>
-                <span className="mt-1 block text-xs text-[#718d84]">
-                  3 people
-                </span>
               </div>
-              <strong className="text-base font-extrabold text-[#11382f]">
-                ₹0.15L
-              </strong>
-            </div>
-
-            {/* Supplier Advance */}
-            <div className="pt-4 flex items-start justify-between">
-              <div>
-                <strong className="block text-sm font-extrabold text-[#11382f]">
-                  Supplier advance
-                </strong>
-                <span className="mt-1 block text-xs text-[#718d84]">
-                  Metro Steel
-                </span>
-              </div>
-              <strong className="text-base font-extrabold text-[#11382f]">
-                ₹1.35L
-              </strong>
-            </div>
+            ))}
           </div>
         </section>
 
-        {/* Modal */}
-        {modal && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs"
-            onClick={() => setModal(false)}
-          >
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                setModal(false)
-              }}
-              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-[#e5ebe7]">
-                <h3 className="text-base font-extrabold text-[#11382f]">
-                  Record Loan / Advance
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setModal(false)}
-                  className="text-[#6d8a81]"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Entry Type
-                  </label>
-                  <select
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    value={entry.type}
-                    onChange={(e) => setEntry({ ...entry, type: e.target.value })}
-                  >
-                    <option value="loan">Loan Liability (You owe)</option>
-                    <option value="advance">Advance Given (They owe you)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Entity / Person Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    placeholder="e.g. HDFC Business Loan"
-                    value={entry.name}
-                    onChange={(e) => setEntry({ ...entry, name: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Amount (₹)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    placeholder="100000"
-                    value={entry.amount}
-                    onChange={(e) => setEntry({ ...entry, amount: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="mt-5 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setModal(false)}
-                  className="rounded-xl border border-[#d6e2dd] py-2.5 text-xs font-bold text-[#55736a]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-xl bg-[#0e655d] py-2.5 text-xs font-bold text-white shadow-xs"
-                >
-                  Save Entry
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
+        {/* Admin Edit Modal */}
+        <AdminEditModal
+          isOpen={Boolean(editingLoan)}
+          onClose={() => setEditingLoan(null)}
+          type="ledger"
+          item={editingLoan}
+          onSaved={() => loadLoans()}
+        />
       </main>
     </div>
   )

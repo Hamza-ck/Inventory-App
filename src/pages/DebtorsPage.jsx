@@ -1,107 +1,154 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
   Search,
   Phone,
   MessageCircle,
-  Plus,
-  Check,
-  User,
-  AlertCircle,
+  FileSpreadsheet,
+  Edit3,
   X,
-  CreditCard,
-  Shield,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { accDb } from '../lib/accountingDb'
 import Nav from '../components/Nav'
+import AdminEditModal from '../components/AdminEditModal'
+
+const DEFAULT_DEBTORS = [
+  {
+    id: 1,
+    name: 'Rahul Mobile Hub',
+    uid: 'UID-CUST-1001',
+    last_invoice: '12 Oct',
+    current_balance: 184200,
+    due_days: 68,
+    phone: '+919876543210',
+    age_bucket: '60d+',
+  },
+  {
+    id: 2,
+    name: 'City Gadget Point',
+    uid: 'UID-CUST-1002',
+    last_invoice: '02 Oct',
+    current_balance: 96500,
+    due_days: 42,
+    phone: '+919811234567',
+    age_bucket: '31–60d',
+  },
+  {
+    id: 3,
+    name: 'Sen Telecom',
+    uid: 'UID-CUST-1003',
+    last_invoice: '16 Oct',
+    current_balance: 71900,
+    due_days: 14,
+    phone: '+919830123456',
+    age_bucket: '0–30d',
+  },
+  {
+    id: 4,
+    name: 'Mitra Cover House',
+    uid: 'UID-CUST-1004',
+    last_invoice: '17 Oct',
+    current_balance: 48300,
+    due_days: 8,
+    phone: '+919845098765',
+    age_bucket: '0–30d',
+  },
+  {
+    id: 5,
+    name: 'Apex Mobile Zone',
+    uid: 'UID-CUST-1005',
+    last_invoice: '10 Oct',
+    current_balance: 163500,
+    due_days: 35,
+    phone: '+919820011223',
+    age_bucket: '31–60d',
+  },
+  {
+    id: 6,
+    name: 'Vikas Digital Store',
+    uid: 'UID-CUST-1006',
+    last_invoice: '15 Oct',
+    current_balance: 275600,
+    due_days: 12,
+    phone: '+919899044556',
+    age_bucket: '0–30d',
+  },
+]
 
 export default function DebtorsPage() {
-  const { isAdmin, shopName } = useAuth()
+  const { shopName } = useAuth()
   const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
+  const [customers, setCustomers] = useState(DEFAULT_DEBTORS)
   const [whatsappSent, setWhatsappSent] = useState(null)
   const [callModal, setCallModal] = useState(null)
-  const [addModalOpen, setAddModalOpen] = useState(false)
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', amount: '', days: '15' })
+  const [editingDebtor, setEditingDebtor] = useState(null)
 
-  // Data from PDF Page 2
-  const [customers, setCustomers] = useState([
-    {
-      id: 1,
-      name: 'Rahul Mobile Hub',
-      lastInvoice: '12 Oct',
-      amount: 184200,
-      displayAmount: '₹1,84,200',
-      badge: '60d+',
-      badgeTone: 'bg-[#feeae6] text-[#b73725]',
-      phone: '+919876543210',
-      dueDays: 68,
-    },
-    {
-      id: 2,
-      name: 'City Gadget Point',
-      lastInvoice: '02 Oct',
-      amount: 96500,
-      displayAmount: '₹96,500',
-      badge: '31–60d',
-      badgeTone: 'bg-[#e2f3ec] text-[#0d786d]',
-      phone: '+919811234567',
-      dueDays: 42,
-    },
-    {
-      id: 3,
-      name: 'Sen Telecom',
-      lastInvoice: '16 Oct',
-      amount: 71900,
-      displayAmount: '₹71,900',
-      badge: '0–30d',
-      badgeTone: 'bg-[#e4f1eb] text-[#146b60]',
-      phone: '+919830123456',
-      dueDays: 14,
-    },
-    {
-      id: 4,
-      name: 'Mitra Cover House',
-      lastInvoice: '17 Oct',
-      amount: 48300,
-      displayAmount: '₹48,300',
-      badge: '0–30d',
-      badgeTone: 'bg-[#e4f1eb] text-[#146b60]',
-      phone: '+919845098765',
-      dueDays: 8,
-    },
-    {
-      id: 5,
-      name: 'Apex Mobile Zone',
-      lastInvoice: '10 Oct',
-      amount: 163500,
-      displayAmount: '₹1,63,500',
-      badge: '31–60d',
-      badgeTone: 'bg-[#e2f3ec] text-[#0d786d]',
-      phone: '+919820011223',
-      dueDays: 35,
-    },
-    {
-      id: 6,
-      name: 'Vikas Digital Store',
-      lastInvoice: '15 Oct',
-      amount: 275600,
-      displayAmount: '₹2,75,600',
-      badge: '0–30d',
-      badgeTone: 'bg-[#e4f1eb] text-[#146b60]',
-      phone: '+919899044556',
-      dueDays: 12,
-    },
-  ])
+  // Load debtors from Dexie DB
+  const loadDebtors = useCallback(async () => {
+    try {
+      const dbDebtors = await accDb.parties.where('type').equals('debtor').toArray()
+      if (dbDebtors && dbDebtors.length > 0) {
+        setCustomers(dbDebtors)
+      } else {
+        setCustomers(DEFAULT_DEBTORS)
+      }
+    } catch {
+      setCustomers(DEFAULT_DEBTORS)
+    }
+  }, [])
 
-  // Filtered by search
+  useEffect(() => {
+    loadDebtors()
+    const onUpdate = () => loadDebtors()
+    window.addEventListener('accounting-data-updated', onUpdate)
+    return () => window.removeEventListener('accounting-data-updated', onUpdate)
+  }, [loadDebtors])
+
+  // Total owed to you
+  const totalOwed = useMemo(() => {
+    return customers.reduce((acc, c) => acc + (Number(c.current_balance) || 0), 0)
+  }, [customers])
+
+  // 3-segment Aging Breakdown (0-30d, 31-60d, 60d+)
+  const agingStats = useMemo(() => {
+    let cat0to30 = 0
+    let cat31to60 = 0
+    let cat60plus = 0
+
+    customers.forEach((c) => {
+      const bal = Number(c.current_balance) || 0
+      const days = Number(c.due_days) || 10
+      if (days > 60) cat60plus += bal
+      else if (days > 30) cat31to60 += bal
+      else cat0to30 += bal
+    })
+
+    const total = cat0to30 + cat31to60 + cat60plus || 1
+    const p1 = Math.round((cat0to30 / total) * 100)
+    const p2 = Math.round((cat31to60 / total) * 100)
+    const p3 = Math.max(0, 100 - p1 - p2)
+
+    return {
+      cat0to30,
+      cat31to60,
+      cat60plus,
+      p1: `${p1}%`,
+      p2: `${p2}%`,
+      p3: `${p3}%`,
+    }
+  }, [customers])
+
   const filteredCustomers = useMemo(() => {
     if (!searchTerm.trim()) return customers
     const term = searchTerm.toLowerCase()
     return customers.filter(
-      (c) => c.name.toLowerCase().includes(term) || c.phone.includes(term)
+      (c) =>
+        c.name.toLowerCase().includes(term) ||
+        (c.phone && c.phone.includes(term)) ||
+        (c.uid && c.uid.toLowerCase().includes(term))
     )
   }, [customers, searchTerm])
 
@@ -110,50 +157,22 @@ export default function DebtorsPage() {
   }
 
   const handleWhatsApp = (cust) => {
+    const balStr = `₹${(Number(cust.current_balance) || 0).toLocaleString('en-IN')}`
     const text = encodeURIComponent(
-      `Dear ${cust.name}, polite payment reminder from ${shopName} regarding your outstanding balance of ${cust.displayAmount} (aging ${cust.badge}). Kindly arrange transfer or settlement. Thank you!`
+      `Dear ${cust.name}, polite payment reminder from ${shopName || 'Shop'} regarding your outstanding balance of ${balStr} (aging ${cust.age_bucket || 'due'}). Kindly arrange transfer or settlement. Thank you!`
     )
-    window.open(`https://wa.me/${cust.phone.replace(/[^0-9]/g, '')}?text=${text}`, '_blank')
+    window.open(`https://wa.me/${(cust.phone || '').replace(/[^0-9]/g, '')}?text=${text}`, '_blank')
     setWhatsappSent(cust.id)
     setTimeout(() => setWhatsappSent(null), 3500)
   }
 
-  const handleAddDebtor = (e) => {
-    e.preventDefault()
-    if (!newCustomer.name) return
-    const num = Number(newCustomer.amount) || 0
-    const days = Number(newCustomer.days) || 15
-    const badge = days > 60 ? '60d+' : days > 30 ? '31–60d' : '0–30d'
-    const badgeTone =
-      days > 60
-        ? 'bg-[#feeae6] text-[#b73725]'
-        : days > 30
-        ? 'bg-[#e2f3ec] text-[#0d786d]'
-        : 'bg-[#e4f1eb] text-[#146b60]'
-
-    const created = {
-      id: Date.now(),
-      name: newCustomer.name,
-      lastInvoice: 'Today',
-      amount: num,
-      displayAmount: `₹${num.toLocaleString('en-IN')}`,
-      badge,
-      badgeTone,
-      phone: newCustomer.phone || '+919876543210',
-      dueDays: days,
-    }
-
-    setCustomers([created, ...customers])
-    setNewCustomer({ name: '', phone: '', amount: '', days: '15' })
-    setAddModalOpen(false)
-  }
-
+  // Add Debtor Handler
   return (
-    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10">
+    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10 font-sans">
       <Nav />
 
       <main className="mx-auto max-w-2xl px-4 pt-4 sm:px-6 sm:pt-6">
-        {/* Top Bar with Back Button (PDF Page 2) */}
+        {/* Top Bar with Back Button & Tally Import (PDF Page 2) */}
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button
@@ -169,138 +188,170 @@ export default function DebtorsPage() {
             </h1>
           </div>
 
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setAddModalOpen(true)}
-              className="flex items-center gap-1 rounded-xl bg-[#0e655d] px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[#0a4f49] transition"
-            >
-              <Plus size={15} /> Add debtor
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => navigate('/tally')}
+            className="flex items-center gap-1.5 rounded-2xl bg-[#0e655d] px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-[#0a4f49] transition active:scale-95"
+            title="Import debtors and closing balances from Tally"
+          >
+            <FileSpreadsheet size={16} strokeWidth={2.5} />
+            <span>Tally import</span>
+          </button>
         </header>
 
-        {/* Total Owed & Aging Breakdown Card (PDF Page 2) */}
+        {/* Total Owed Card & 3-segment Aging Progress Bar (PDF Page 2) */}
         <div className="mb-5 rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs">
           <span className="text-xs font-bold text-[#627d75]">Total owed to you</span>
           <strong className="mt-1 block text-[34px] font-extrabold tracking-tight text-[#0e655d]">
-            ₹8.4L
+            ₹{(totalOwed / 100000).toFixed(1)}L
           </strong>
 
-          {/* 3-segment aging bar */}
+          {/* 3-segment horizontal progress bar matching PDF */}
           <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-[#e8ecea]">
             <div
               className="bg-[#0e655d] transition-all"
-              style={{ width: '48%' }}
-              title="0–30d: ₹4.1L"
+              style={{ width: agingStats.p1 }}
+              title={`0–30d: ₹${(agingStats.cat0to30 / 100000).toFixed(1)}L`}
             />
             <div
-              className="bg-[#4aa08d] transition-all"
-              style={{ width: '31%' }}
-              title="31–60d: ₹2.6L"
+              className="bg-[#3b9b8b] transition-all"
+              style={{ width: agingStats.p2 }}
+              title={`31–60d: ₹${(agingStats.cat31to60 / 100000).toFixed(1)}L`}
             />
             <div
               className="bg-[#c25e19] transition-all"
-              style={{ width: '21%' }}
-              title="60d+: ₹1.7L"
+              style={{ width: agingStats.p3 }}
+              title={`60d+: ₹${(agingStats.cat60plus / 100000).toFixed(1)}L`}
             />
           </div>
 
-          {/* Aging labels */}
+          {/* Aging labels matching PDF */}
           <div className="mt-3 flex items-center justify-between text-xs font-bold">
             <span className="flex items-center gap-1.5 text-[#0e655d]">
               <span className="h-2 w-2 rounded-full bg-[#0e655d]" />
-              0–30d ₹4.1L
+              0–30d ₹{(agingStats.cat0to30 / 100000).toFixed(1)}L
             </span>
-            <span className="flex items-center gap-1.5 text-[#3a8373]">
-              <span className="h-2 w-2 rounded-full bg-[#4aa08d]" />
-              31–60d ₹2.6L
+            <span className="flex items-center gap-1.5 text-[#2b7f71]">
+              <span className="h-2 w-2 rounded-full bg-[#3b9b8b]" />
+              31–60d ₹{(agingStats.cat31to60 / 100000).toFixed(1)}L
             </span>
             <span className="flex items-center gap-1.5 text-[#c25e19]">
               <span className="h-2 w-2 rounded-full bg-[#c25e19]" />
-              60d+ ₹1.7L
+              60d+ ₹{(agingStats.cat60plus / 100000).toFixed(1)}L
             </span>
           </div>
         </div>
 
-        {/* Search Customer Input (PDF Page 2) */}
-        <div className="mb-4 flex items-center gap-2 rounded-2xl border border-[#dbe6df] bg-white px-3.5 py-2.5 shadow-2xs focus-within:border-[#0e655d]">
-          <Search size={18} className="text-[#7c978f]" />
+        {/* Search Customer or Phone (PDF Page 2) */}
+        <div className="mb-4 flex items-center gap-2 rounded-2xl border border-[#dbe6df] bg-white px-3.5 py-2.5 shadow-2xs focus-within:border-[#0e655d] transition">
+          <Search size={18} className="text-[#7c978f] shrink-0" />
           <input
             type="text"
-            className="w-full bg-transparent text-xs font-medium text-[#11382f] outline-none placeholder:text-[#88a098]"
-            placeholder="Search customer or phone"
+            className="w-full bg-transparent text-xs font-semibold text-[#11382f] outline-none placeholder:text-[#88a098]"
+            placeholder="Search customer, phone or permanent UID..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
-          {searchTerm && (
-            <button type="button" onClick={() => setSearchTerm('')} className="text-[#88a098]">
-              <X size={14} />
-            </button>
-          )}
         </div>
 
-        {/* Customer Cards List (PDF Page 2) */}
+        {/* Customer Cards List matching PDF Page 2 */}
         <div className="space-y-3">
-          {filteredCustomers.map((cust) => (
-            <article
-              key={cust.id}
-              className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-[16px] font-extrabold text-[#11382f]">
-                    {cust.name}
-                  </h2>
-                  <span className="mt-0.5 block text-xs text-[#718d84]">
-                    Last invoice {cust.lastInvoice}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <strong className="block text-[17px] font-extrabold text-[#0e655d]">
-                    {cust.displayAmount}
-                  </strong>
-                  <span
-                    className={`mt-1 inline-block rounded-md px-2 py-0.5 text-[11px] font-bold ${cust.badgeTone}`}
-                  >
-                    {cust.badge}
-                  </span>
-                </div>
-              </div>
+          {filteredCustomers.map((cust) => {
+            const bal = Number(cust.current_balance) || 0
+            const days = Number(cust.due_days) || 10
+            const isCritical = days > 60
 
-              {/* Action Buttons: "Call" & "WhatsApp reminder" (PDF Page 2) */}
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleCall(cust)}
-                  className="flex items-center justify-center gap-2 rounded-2xl border border-[#c6dfd6] bg-white py-2.5 text-xs font-bold text-[#145347] hover:bg-[#f1f7f4] transition active:scale-98"
-                >
-                  <Phone size={14} />
-                  Call
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleWhatsApp(cust)}
-                  className="flex items-center justify-center gap-2 rounded-2xl bg-[#0e655d] py-2.5 text-xs font-bold text-white shadow-2xs hover:bg-[#0a4f49] transition active:scale-98"
-                >
-                  {whatsappSent === cust.id ? (
-                    <>
-                      <Check size={14} />
-                      Reminder Sent!
-                    </>
-                  ) : (
-                    <>
-                      <MessageCircle size={14} />
-                      WhatsApp reminder
-                    </>
+            return (
+              <article
+                key={cust.id}
+                className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-[17px] font-extrabold text-[#11382f]">
+                        {cust.name}
+                      </h2>
+                      {cust.uid && (
+                        <span className="font-mono text-[10px] text-[#0d786d] font-extrabold bg-[#e4f3eb] px-1.5 py-0.5 rounded">
+                          {cust.uid}
+                        </span>
+                      )}
+                    </div>
+                    <span className="mt-0.5 block text-xs text-[#718d84]">
+                      Last invoice {cust.last_invoice || 'Recent'}
+                    </span>
+                  </div>
+
+                  <div className="text-right">
+                    <strong className="block text-[18px] font-extrabold text-[#11382f]">
+                      ₹{bal.toLocaleString('en-IN')}
+                    </strong>
+                    <span
+                      className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${
+                        isCritical
+                          ? 'bg-[#feeae6] text-[#b73725]'
+                          : days > 30
+                          ? 'bg-[#e2f3ec] text-[#0d786d]'
+                          : 'bg-[#e4f1eb] text-[#146b60]'
+                      }`}
+                    >
+                      {cust.age_bucket || (days > 60 ? '60d+' : days > 30 ? '31–60d' : '0–30d')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Call, WhatsApp & Collect Dues Actions */}
+                <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                  {cust.phone && (
+                    <button
+                      type="button"
+                      onClick={() => handleCall(cust)}
+                      className="flex items-center gap-1.5 rounded-xl border border-[#cbe1d7] bg-white px-3 py-1.5 text-xs font-bold text-[#145347] hover:bg-[#eef7f3] transition"
+                    >
+                      <Phone size={13} />
+                      <span>Call</span>
+                    </button>
                   )}
-                </button>
-              </div>
-            </article>
-          ))}
+
+                  {cust.phone && (
+                    <button
+                      type="button"
+                      onClick={() => handleWhatsApp(cust)}
+                      className="flex items-center gap-1.5 rounded-xl bg-[#0e655d] px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-[#0a4f49] transition active:scale-95"
+                    >
+                      <MessageCircle size={13} />
+                      <span>
+                        {whatsappSent === cust.id ? 'Reminder sent ✓' : 'WhatsApp reminder'}
+                      </span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setEditingDebtor(cust)}
+                    className="flex items-center gap-1.5 rounded-xl border border-[#0e655d]/30 bg-[#f0f9f5] px-3.5 py-1.5 text-xs font-bold text-[#0e655d] hover:bg-[#e2f3ec] transition active:scale-95"
+                    title="Admin edit debtor details"
+                  >
+                    <Edit3 size={13} />
+                    <span>Edit</span>
+                  </button>
+                </div>
+              </article>
+            )
+          })}
         </div>
 
-        {/* Call Customer Prompt Modal */}
+        {/* Admin Edit Modal for Debtors */}
+        <AdminEditModal
+          isOpen={Boolean(editingDebtor)}
+          onClose={() => setEditingDebtor(null)}
+          type="debtor"
+          item={editingDebtor}
+          onSaved={() => loadDebtors()}
+        />
+
+        {/* Modal: Call Dialog */}
         {callModal && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs"
@@ -310,18 +361,28 @@ export default function DebtorsPage() {
               className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-[#e3f4ee] text-[#0e655d]">
-                <Phone size={22} />
+              <div className="flex items-center justify-between pb-3 border-b border-[#e5ebe7]">
+                <h3 className="text-base font-extrabold text-[#11382f]">Call Customer</h3>
+                <button
+                  type="button"
+                  onClick={() => setCallModal(null)}
+                  className="text-[#6d8a81]"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <h3 className="text-center text-lg font-extrabold text-[#11382f]">
-                Call {callModal.name}
-              </h3>
-              <p className="mt-1 text-center text-xs text-[#6e8a81]">
-                Outstanding balance: {callModal.displayAmount} ({callModal.badge})
-              </p>
-              <p className="mt-3 text-center text-sm font-bold text-[#0e655d]">
-                {callModal.phone}
-              </p>
+              <div className="mt-4 text-center">
+                <span className="block text-xs text-[#6e8a81]">Customer</span>
+                <strong className="block text-lg font-bold text-[#11382f]">
+                  {callModal.name}
+                </strong>
+                <span className="text-sm font-semibold text-[#0d786d]">
+                  {callModal.phone}
+                </span>
+                <div className="mt-3 rounded-2xl bg-[#f7faf8] p-3 text-xs text-[#527267]">
+                  Outstanding balance: <strong>₹{Number(callModal.current_balance).toLocaleString('en-IN')}</strong> ({callModal.age_bucket})
+                </div>
+              </div>
               <div className="mt-5 grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -332,110 +393,12 @@ export default function DebtorsPage() {
                 </button>
                 <a
                   href={`tel:${callModal.phone}`}
-                  onClick={() => setCallModal(null)}
-                  className="flex items-center justify-center gap-1.5 rounded-xl bg-[#0e655d] py-2.5 text-xs font-bold text-white no-underline shadow-xs"
+                  className="rounded-xl bg-[#0e655d] py-2.5 text-center text-xs font-bold text-white shadow-xs no-underline flex items-center justify-center gap-1.5"
                 >
-                  <Phone size={14} /> Dial now
+                  <Phone size={14} /> Call now
                 </a>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* Add Debtor Modal */}
-        {addModalOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs"
-            onClick={() => setAddModalOpen(false)}
-          >
-            <form
-              onSubmit={handleAddDebtor}
-              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-[#e5ebe7]">
-                <h3 className="text-base font-extrabold text-[#11382f]">
-                  Add New Debtor
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setAddModalOpen(false)}
-                  className="text-[#6d8a81]"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Customer Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    placeholder="e.g. Apex Telecom"
-                    value={newCustomer.name}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Phone / WhatsApp Number
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    placeholder="+91 98765 00000"
-                    value={newCustomer.phone}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Outstanding Amount (₹)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    placeholder="50000"
-                    value={newCustomer.amount}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, amount: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Due Age
-                  </label>
-                  <select
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    value={newCustomer.days}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, days: e.target.value })}
-                  >
-                    <option value="15">0–30 days (Healthy)</option>
-                    <option value="45">31–60 days (Follow-up)</option>
-                    <option value="75">60+ days (Critical)</option>
-                  </select>
-                </div>
-              </div>
-              <div className="mt-5 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAddModalOpen(false)}
-                  className="rounded-xl border border-[#d6e2dd] py-2.5 text-xs font-bold text-[#55736a]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-xl bg-[#0e655d] py-2.5 text-xs font-bold text-white shadow-xs"
-                >
-                  Save Debtor
-                </button>
-              </div>
-            </form>
           </div>
         )}
       </main>

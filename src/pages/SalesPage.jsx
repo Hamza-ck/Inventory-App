@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
   ArrowDownToLine,
-  Plus,
   Receipt,
   Search,
+  Edit3,
+  FileSpreadsheet,
 } from 'lucide-react'
 import {
   BarChart,
@@ -18,7 +19,7 @@ import {
 } from 'recharts'
 import Nav from '../components/Nav'
 import InvoicePrintModal from '../components/InvoicePrintModal'
-import VoucherModal from '../components/VoucherModal'
+import AdminEditModal from '../components/AdminEditModal'
 import { accDb } from '../lib/accountingDb'
 
 // Baseline PDF invoices (Page 3) as fallback seed
@@ -104,7 +105,7 @@ const DEFAULT_PDF_INVOICES = [
 export default function SalesPage() {
   const navigate = useNavigate()
   const [selectedInvoice, setSelectedInvoice] = useState(null)
-  const [newVoucherOpen, setNewVoucherOpen] = useState(false)
+  const [editingInvoice, setEditingInvoice] = useState(null)
   const [search, setSearch] = useState('')
   const [invoices, setInvoices] = useState(DEFAULT_PDF_INVOICES)
 
@@ -214,11 +215,12 @@ export default function SalesPage() {
 
           <button
             type="button"
-            onClick={() => setNewVoucherOpen(true)}
+            onClick={() => navigate('/tally')}
             className="flex items-center gap-1.5 rounded-2xl bg-[#0e655d] px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-[#0a4f49] transition active:scale-95"
+            title="Import vouchers directly from Tally XML / Excel"
           >
-            <Plus size={16} strokeWidth={2.5} />
-            <span>New invoice</span>
+            <FileSpreadsheet size={16} strokeWidth={2.5} />
+            <span>Tally import</span>
           </button>
         </header>
 
@@ -338,6 +340,19 @@ export default function SalesPage() {
                     </span>
                   </div>
 
+                  {/* Admin Edit button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditingInvoice(inv)
+                    }}
+                    className="grid h-10 w-10 place-items-center rounded-2xl bg-[#f0f9f5] border border-[#0e655d]/20 text-[#0e655d] hover:bg-[#e3f4ee] transition active:scale-95"
+                    title="Admin edit invoice details"
+                  >
+                    <Edit3 size={16} strokeWidth={2.5} />
+                  </button>
+
                   {/* Solid teal square download/arrow button matching PDF */}
                   <button
                     type="button"
@@ -358,7 +373,7 @@ export default function SalesPage() {
               <Receipt size={32} className="mx-auto text-[#88a39b] mb-2" />
               <p className="text-sm font-bold text-[#11382f]">No invoices found</p>
               <p className="text-xs text-[#6e8a81] mt-1">
-                Try searching for a different customer name or invoice number.
+                Import day book or sales vouchers from Tally Integration.
               </p>
             </div>
           )}
@@ -371,19 +386,13 @@ export default function SalesPage() {
           invoice={selectedInvoice}
         />
 
-        {/* Modern New Sales Invoice Modal */}
-        <VoucherModal
-          isOpen={newVoucherOpen}
-          onClose={() => setNewVoucherOpen(false)}
-          onSuccess={() => {
-            loadInvoices()
-            setNewVoucherOpen(false)
-          }}
-          onSaveAndPrint={(saved) => {
-            loadInvoices()
-            setNewVoucherOpen(false)
-            setSelectedInvoice(saved)
-          }}
+        {/* Admin Edit Modal for Invoices & Vouchers */}
+        <AdminEditModal
+          isOpen={Boolean(editingInvoice)}
+          onClose={() => setEditingInvoice(null)}
+          type="voucher"
+          item={editingInvoice}
+          onSaved={() => loadInvoices()}
         />
       </main>
     </div>

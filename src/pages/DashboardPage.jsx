@@ -49,6 +49,8 @@ export default function DashboardPage() {
   const [editLayout, setEditLayout] = useState(false)
   const [downloadSuccess, setDownloadSuccess] = useState(false)
   const [remindSent, setRemindSent] = useState(null)
+  const [liveMetrics, setLiveMetrics] = useState(null)
+  const [liveDebtors, setLiveDebtors] = useState(null)
   const navigate = useNavigate()
 
   // Format currency in Indian standard Lakhs/Crores
@@ -63,40 +65,123 @@ export default function DashboardPage() {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(num)
   }
 
-  // Exact metrics as per PDF specification
+  // Load live DB data
+  useEffect(() => {
+    let active = true
+
+    async function loadData() {
+      try {
+        const [parties, materials, ledgers] = await Promise.all([
+          accDb.parties.toArray(),
+          accDb.materials.toArray(),
+          accDb.ledgers.toArray(),
+        ])
+        if (!active) return
+
+        const debtors = parties.filter((p) => p.type === 'debtor')
+        const creditors = parties.filter((p) => p.type === 'creditor')
+
+        const debtorsSum = debtors.reduce((s, d) => s + (Number(d.current_balance) || 0), 0)
+        const creditorsSum = creditors.reduce((s, c) => s + (Number(c.current_balance) || 0), 0)
+        const stockSum = materials.reduce(
+          (s, m) => s + (Number(m.current_qty) || 0) * (Number(m.sales_rate) || 0),
+          0
+        )
+
+        const loansOwed = ledgers
+          .filter((l) => (l.group || '').toLowerCase().includes('loans (liability)'))
+          .reduce((s, l) => s + (Number(l.current_balance) || 0), 0)
+        const advGiven = ledgers
+          .filter((l) => (l.group || '').toLowerCase().includes('loans & advances (asset)'))
+          .reduce((s, l) => s + (Number(l.current_balance) || 0), 0)
+
+        setLiveMetrics({
+          debtorsSum,
+          debtorsCount: debtors.length,
+          creditorsSum,
+          creditorsCount: creditors.length,
+          stockSum,
+          netLoans: Math.max(0, loansOwed - advGiven),
+        })
+
+        const topDebtors = debtors
+          .filter((d) => (Number(d.current_balance) || 0) > 0)
+          .sort((a, b) => (Number(b.current_balance) || 0) - (Number(a.current_balance) || 0))
+          .slice(0, 5)
+          .map((d) => {
+            const days = Number(d.due_days) || 10
+            return {
+              name: d.name,
+              age: d.age_bucket || (days > 60 ? '60d+' : days > 30 ? '31–60d' : '0–30d'),
+              ageTone:
+                days > 60
+                  ? 'bg-[#fcebe6] text-[#ba3e29]'
+                  : days > 30
+                  ? 'bg-[#e2f3ec] text-[#0d786d]'
+                  : 'bg-[#e3f2ec] text-[#136b60]',
+              amount: `₹${(Number(d.current_balance) || 0).toLocaleString('en-IN')}`,
+              phone: d.phone || '+919876543210',
+            }
+          })
+
+        if (topDebtors.length > 0) {
+          setLiveDebtors(topDebtors)
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    loadData()
+    const onUpdate = () => loadData()
+    window.addEventListener('accounting-data-updated', onUpdate)
+    return () => {
+      active = false
+      window.removeEventListener('accounting-data-updated', onUpdate)
+    }
+  }, [])
+
+  // Metrics matching PDF specification, enhanced with live Dexie DB data
   const metrics = useMemo(() => {
+    const debtorsVal = liveMetrics?.debtorsSum ? formatMoney(liveMetrics.debtorsSum) : '₹8.4L'
+    const debtorsDetail = `They owe you · ${liveMetrics?.debtorsCount || 23}`
+    const creditorsVal = liveMetrics?.creditorsSum ? formatMoney(liveMetrics.creditorsSum) : '₹5.1L'
+    const creditorsDetail = `You owe · ${liveMetrics?.creditorsCount || 9}`
+    const stockVal = liveMetrics?.stockSum ? formatMoney(liveMetrics.stockSum) : '₹22.6L'
+    const loansVal = liveMetrics?.netLoans ? formatMoney(liveMetrics.netLoans) : '₹3.0L'
+
     if (period === 'Today') {
       return {
         sales: { value: '₹1.42L', diff: '▲ 12% vs yesterday', isPositive: true },
         profit: { value: '₹21.4K', diff: '▲ 8% vs yesterday', isPositive: true },
         expenses: { value: '₹9.8K', diff: '▼ 4% vs yesterday', isPositive: false },
-        debtors: { value: '₹8.4L', detail: 'They owe you · 23' },
-        creditors: { value: '₹5.1L', detail: 'You owe · 9' },
-        inventory: { value: '₹22.6L', detail: 'Stock value' },
-        loans: { value: '₹3.0L', detail: 'Net balance' },
+        debtors: { value: debtorsVal, detail: debtorsDetail },
+        creditors: { value: creditorsVal, detail: creditorsDetail },
+        inventory: { value: stockVal, detail: 'Stock value' },
+        loans: { value: loansVal, detail: 'Net balance' },
       }
     } else if (period === 'Week') {
       return {
         sales: { value: '₹9.8L', diff: '▲ 14% vs last week', isPositive: true },
         profit: { value: '₹1.65L', diff: '▲ 10% vs last week', isPositive: true },
         expenses: { value: '₹68K', diff: '▼ 2% vs last week', isPositive: false },
-        debtors: { value: '₹8.4L', detail: 'They owe you · 23' },
-        creditors: { value: '₹5.1L', detail: 'You owe · 9' },
-        inventory: { value: '₹22.6L', detail: 'Stock value' },
-        loans: { value: '₹3.0L', detail: 'Net balance' },
+        debtors: { value: debtorsVal, detail: debtorsDetail },
+        creditors: { value: creditorsVal, detail: creditorsDetail },
+        inventory: { value: stockVal, detail: 'Stock value' },
+        loans: { value: loansVal, detail: 'Net balance' },
       }
     } else {
       return {
         sales: { value: '₹41.2L', diff: '▲ 18% vs last month', isPositive: true },
         profit: { value: '₹6.8L', diff: '▲ 15% vs last month', isPositive: true },
         expenses: { value: '₹3.1L', diff: '▼ 4% vs last month', isPositive: false },
-        debtors: { value: '₹8.4L', detail: 'They owe you · 23' },
-        creditors: { value: '₹5.1L', detail: 'You owe · 9' },
-        inventory: { value: '₹22.6L', detail: 'Stock value' },
-        loans: { value: '₹3.0L', detail: 'Net balance' },
+        debtors: { value: debtorsVal, detail: debtorsDetail },
+        creditors: { value: creditorsVal, detail: creditorsDetail },
+        inventory: { value: stockVal, detail: 'Stock value' },
+        loans: { value: loansVal, detail: 'Net balance' },
       }
     }
-  }, [period])
+  }, [period, liveMetrics])
 
   // 7-day Sales Bar Chart data (PDF Page 3 & 5)
   const sales7Days = [
@@ -110,7 +195,7 @@ export default function DashboardPage() {
   ]
 
   // Money to collect list (PDF Page 5)
-  const moneyToCollect = [
+  const moneyToCollect = liveDebtors || [
     {
       name: 'Rahul Mobile Hub',
       age: '60d+',

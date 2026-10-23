@@ -1,89 +1,92 @@
-import { useState } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
-  Plus,
-  MinusCircle,
+  FileSpreadsheet,
+  Edit3,
   TrendingDown,
-  Calendar,
-  X,
-  CheckCircle,
 } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
+import { accDb } from '../lib/accountingDb'
+import AdminEditModal from '../components/AdminEditModal'
+
+const DEFAULT_EXPENSES = [
+  {
+    id: 1,
+    name: 'Rent',
+    rawAmount: 120000,
+  },
+  {
+    id: 2,
+    name: 'Salaries',
+    rawAmount: 110000,
+  },
+  {
+    id: 3,
+    name: 'Electricity',
+    rawAmount: 28000,
+  },
+  {
+    id: 4,
+    name: 'Transport',
+    rawAmount: 22000,
+  },
+  {
+    id: 5,
+    name: 'Packaging & Supplies',
+    rawAmount: 32000,
+  },
+]
 
 export default function ExpensesPage() {
-  const { isAdmin } = useAuth()
   const navigate = useNavigate()
-  const [addModal, setAddModal] = useState(false)
-  const [newExpense, setNewExpense] = useState({ category: 'Transport', amount: '', note: '' })
+  const [categories, setCategories] = useState(DEFAULT_EXPENSES)
+  const [editingExpense, setEditingExpense] = useState(null)
 
-  // Expenses data matching PDF Page 8
-  const [categories, setCategories] = useState([
-    {
-      id: 1,
-      name: 'Rent',
-      amount: '₹1.2L',
-      rawAmount: 120000,
-      barWidth: '82%',
-      barColor: 'bg-[#b8521a]',
-    },
-    {
-      id: 2,
-      name: 'Salaries',
-      amount: '₹1.1L',
-      rawAmount: 110000,
-      barWidth: '75%',
-      barColor: 'bg-[#b8521a]',
-    },
-    {
-      id: 3,
-      name: 'Electricity',
-      amount: '₹28K',
-      rawAmount: 28000,
-      barWidth: '32%',
-      barColor: 'bg-[#cfa472]',
-    },
-    {
-      id: 4,
-      name: 'Transport',
-      amount: '₹22K',
-      rawAmount: 22000,
-      barWidth: '24%',
-      barColor: 'bg-[#cfa472]',
-    },
-    {
-      id: 5,
-      name: 'Packaging & Supplies',
-      amount: '₹32K',
-      rawAmount: 32000,
-      barWidth: '35%',
-      barColor: 'bg-[#cfa472]',
-    },
-  ])
+  // Load expenses from Dexie ledgers/vouchers
+  const loadExpenses = useCallback(async () => {
+    try {
+      const expLedgers = await accDb.ledgers.where('category').equals('expense').toArray()
+      if (expLedgers && expLedgers.length > 0) {
+        setCategories(
+          expLedgers.map((l) => ({
+            id: l.id,
+            name: l.name,
+            rawAmount: Number(l.current_balance) || 0,
+          }))
+        )
+      } else {
+        setCategories(DEFAULT_EXPENSES)
+      }
+    } catch {
+      setCategories(DEFAULT_EXPENSES)
+    }
+  }, [])
 
-  const handleAddExpense = (e) => {
-    e.preventDefault()
-    const amt = Number(newExpense.amount) || 0
-    const display = amt >= 100000 ? `₹${(amt / 100000).toFixed(1)}L` : `₹${(amt / 1000).toFixed(0)}K`
+  useEffect(() => {
+    loadExpenses()
+    const onUpdate = () => loadExpenses()
+    window.addEventListener('accounting-data-updated', onUpdate)
+    return () => window.removeEventListener('accounting-data-updated', onUpdate)
+  }, [loadExpenses])
 
-    setCategories([
-      ...categories,
-      {
-        id: Date.now(),
-        name: newExpense.category,
-        amount: display,
-        rawAmount: amt,
-        barWidth: `${Math.min(90, Math.max(15, (amt / 150000) * 100))}%`,
-        barColor: amt > 50000 ? 'bg-[#b8521a]' : 'bg-[#cfa472]',
-      },
-    ])
-    setNewExpense({ category: 'Transport', amount: '', note: '' })
-    setAddModal(false)
+  // Total monthly expenses
+  const totalExpenses = useMemo(() => {
+    return categories.reduce((sum, c) => sum + (Number(c.rawAmount) || 0), 0)
+  }, [categories])
+
+  const maxExpense = useMemo(() => {
+    return Math.max(...categories.map((c) => Number(c.rawAmount) || 0), 120000)
+  }, [categories])
+
+  const formatAmount = (amt) => {
+    if (amt >= 100000) return `₹${(amt / 100000).toFixed(1)}L`
+    if (amt >= 1000) return `₹${(amt / 1000).toFixed(0)}K`
+    return `₹${amt}`
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10">
+    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10 font-sans">
       <Nav />
 
       <main className="mx-auto max-w-2xl px-4 pt-4 sm:px-6 sm:pt-6">
@@ -103,143 +106,77 @@ export default function ExpensesPage() {
             </h1>
           </div>
 
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setAddModal(true)}
-              className="flex items-center gap-1.5 rounded-xl bg-[#0e655d] px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[#0a4f49] transition"
-            >
-              <Plus size={15} /> Add expense
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => navigate('/tally')}
+            className="flex items-center gap-1.5 rounded-2xl bg-[#0e655d] px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-[#0a4f49] transition active:scale-95"
+            title="Import vouchers from Tally XML"
+          >
+            <FileSpreadsheet size={16} />
+            <span>Tally import</span>
+          </button>
         </header>
 
-        {/* This Month Header Card (PDF Page 8) */}
-        <div className="mb-6 rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs">
-          <span className="text-xs font-bold text-[#627d75]">This month</span>
-          <strong className="mt-1 block text-[34px] font-extrabold tracking-tight text-[#b8521a]">
-            ₹3.1L
+        {/* Featured This Month Card (PDF Page 8) */}
+        <div className="mb-6 rounded-3xl border border-[#e1e9e3] bg-white p-6 shadow-xs">
+          <span className="text-xs font-bold text-[#6a847c]">This month</span>
+          <strong className="mt-1 block text-[38px] font-extrabold tracking-tight text-[#c25e19]">
+            {formatAmount(totalExpenses)}
           </strong>
-          <div className="mt-2 flex items-center gap-1.5 text-xs font-bold text-[#678278]">
-            <span>▼ 4% vs last month</span>
-          </div>
+          <span className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-[#147366]">
+            <TrendingDown size={14} /> 4% vs last month
+          </span>
         </div>
 
         {/* By Category Section (PDF Page 8) */}
-        <section className="rounded-3xl border border-[#e1e9e3] bg-white p-5 sm:p-6 shadow-xs">
-          <h2 className="text-[17px] font-extrabold text-[#11382f] mb-6">
+        <section className="rounded-3xl border border-[#e1e9e3] bg-white p-6 shadow-xs">
+          <h2 className="text-[17px] font-extrabold text-[#11382f] mb-4">
             By category
           </h2>
 
-          <div className="space-y-6">
-            {categories.map((cat) => (
-              <div key={cat.id}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-extrabold text-[#11382f]">
-                    {cat.name}
-                  </span>
-                  <strong className="text-sm font-extrabold text-[#11382f]">
-                    {cat.amount}
-                  </strong>
-                </div>
+          <div className="space-y-5">
+            {categories.map((cat) => {
+              const amt = Number(cat.rawAmount) || 0
+              const percentage = Math.min(100, Math.max(8, Math.round((amt / maxExpense) * 100)))
+              const barColor = amt >= 80000 ? 'bg-[#b8521a]' : 'bg-[#cfa472]'
 
-                {/* Styled solid progress bar matching PDF Page 8 */}
-                <div className="h-3 w-full overflow-hidden rounded-full bg-[#e8ecea]">
-                  <div
-                    className={`h-full rounded-full ${cat.barColor} transition-all duration-300`}
-                    style={{ width: cat.barWidth }}
-                  />
+              return (
+                <div key={cat.id || cat.name} className="group">
+                  <div className="flex items-center justify-between text-sm font-extrabold text-[#11382f] mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span>{cat.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setEditingExpense({ id: cat.id, name: cat.name, current_balance: amt, category: 'expense' })}
+                        className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
+                        title="Admin Edit expense"
+                      >
+                        <Edit3 size={11} />
+                        <span>Edit</span>
+                      </button>
+                    </div>
+                    <span>{formatAmount(amt)}</span>
+                  </div>
+                  <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#edebe9]">
+                    <div
+                      className={`h-full rounded-full ${barColor} transition-all duration-300`}
+                      style={{ width: `${percentage}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </section>
 
-        {/* Add Expense Modal */}
-        {addModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs"
-            onClick={() => setAddModal(false)}
-          >
-            <form
-              onSubmit={handleAddExpense}
-              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-[#e5ebe7]">
-                <h3 className="text-base font-extrabold text-[#11382f]">
-                  Record Operating Expense
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setAddModal(false)}
-                  className="text-[#6d8a81]"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Expense Category
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    placeholder="e.g. Courier & Freight"
-                    value={newExpense.category}
-                    onChange={(e) => setNewExpense({ ...newExpense, category: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Amount (₹)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    placeholder="15000"
-                    value={newExpense.amount}
-                    onChange={(e) => setNewExpense({ ...newExpense, amount: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    Note / Narration
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
-                    placeholder="Monthly payment"
-                    value={newExpense.note}
-                    onChange={(e) => setNewExpense({ ...newExpense, note: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="mt-5 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAddModal(false)}
-                  className="rounded-xl border border-[#d6e2dd] py-2.5 text-xs font-bold text-[#55736a]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-xl bg-[#0e655d] py-2.5 text-xs font-bold text-white shadow-xs"
-                >
-                  Save Expense
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
+        {/* Admin Edit Modal */}
+        <AdminEditModal
+          isOpen={Boolean(editingExpense)}
+          onClose={() => setEditingExpense(null)}
+          type="ledger"
+          item={editingExpense}
+          onSaved={() => loadExpenses()}
+        />
       </main>
     </div>
   )

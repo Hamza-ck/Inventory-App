@@ -1,4 +1,11 @@
 import * as XLSX from 'xlsx'
+import {
+  accDb,
+  createDebtor,
+  createCreditor,
+  createStockItem,
+  createVoucher,
+} from './accountingDb'
 
 /**
  * Tally Integration Engine
@@ -544,3 +551,140 @@ export const SAMPLE_TALLY_XML = `<?xml version="1.0" encoding="utf-8"?>
     </IMPORTDATA>
   </BODY>
 </ENVELOPE>`
+
+/**
+ * Persist parsed Tally XML or Excel records directly into Dexie DB
+ */
+export async function importTallyDataToDb(parsedData) {
+  let newCount = 0
+  let skippedCount = 0
+  let updatedCount = 0
+  const problems = []
+
+  // 1. Import Ledgers
+  if (Array.isArray(parsedData.ledgers) && parsedData.ledgers.length > 0) {
+    for (const l of parsedData.ledgers) {
+      try {
+        const group = (l.group || '').toLowerCase()
+        if (group.includes('debtor') || group.includes('customer')) {
+          const existing = await accDb.parties.where('name').equalsIgnoreCase(l.name.trim()).first()
+          if (existing) {
+            await accDb.parties.update(existing.id, {
+              current_balance: Number(l.current_balance || l.opening_balance || existing.current_balance),
+              phone: l.phone || existing.phone,
+            })
+            updatedCount++
+          } else {
+            await createDebtor({
+              name: l.name,
+              phone: l.phone || '',
+              current_balance: Number(l.current_balance || l.opening_balance || 0),
+              due_days: 15,
+            })
+            newCount++
+          }
+        } else if (group.includes('creditor') || group.includes('supplier')) {
+          const existing = await accDb.parties.where('name').equalsIgnoreCase(l.name.trim()).first()
+          if (existing) {
+            await accDb.parties.update(existing.id, {
+              current_balance: Number(l.current_balance || l.opening_balance || existing.current_balance),
+              phone: l.phone || existing.phone,
+            })
+            updatedCount++
+          } else {
+            await createCreditor({
+              name: l.name,
+              phone: l.phone || '',
+              current_balance: Number(l.current_balance || l.opening_balance || 0),
+              due_days: 14,
+              next_payment: 'Next month',
+            })
+            newCount++
+          }
+        } else if (group.includes('bank') || group.includes('cash')) {
+          const existing = await accDb.ledgers.where('name').equalsIgnoreCase(l.name.trim()).first()
+          if (existing) {
+            await accDb.ledgers.update(existing.id, {
+              current_balance: Number(l.current_balance || l.opening_balance || existing.current_balance),
+            })
+            updatedCount++
+          } else {
+            await accDb.ledgers.add({
+              name: l.name.trim(),
+              group: group.includes('bank') ? 'Bank Accounts' : 'Cash-in-hand',
+              category: 'asset',
+              current_balance: Number(l.current_balance || l.opening_balance || 0),
+            })
+            newCount++
+          }
+        }
+      } catch (err) {
+        problems.push({
+          where: `Ledger ${l.name}`,
+          problem: err.message || 'Error importing ledger',
+          howToFix: 'Check ledger details in Tally',
+        })
+      }
+    }
+  }
+
+  // 2. Import Stock Items
+  if (Array.isArray(parsedData.stockItems) && parsedData.stockItems.length > 0) {
+    for (const item of parsedData.stockItems) {
+      try {
+        const existing = await accDb.materials.where('name').equalsIgnoreCase(item.name.trim()).first()
+        if (existing) {
+          await accDb.materials.update(existing.id, {
+            current_qty: item.current_qty != null ? Number(item.current_qty) : existing.current_qty,
+            purchase_rate: Number(item.purchase_rate) || existing.purchase_rate,
+            sales_rate: Number(item.sales_rate) || existing.sales_rate,
+          })
+          updatedCount++
+        } else {
+          await createStockItem({
+            name: item.name,
+            sku: item.sku,
+            category: item.category || 'Tally Imported',
+            unit: item.unit || 'pcs',
+            purchase_rate: Number(item.purchase_rate) || 100,
+            sales_rate: Number(item.sales_rate) || 130,
+            current_qty: Number(item.current_qty) || 0,
+            reorder_threshold: Number(item.reorder_threshold) || 10,
+          })
+          newCount++
+        }
+      } catch (err) {
+        problems.push({
+          where: `Stock item ${item.name}`,
+          problem: err.message || 'Error importing stock item',
+          howToFix: 'Verify unit and rate in Tally',
+        })
+      }
+    }
+  }
+
+  // 3. Import Vouchers
+  if (Array.isArray(parsedData.vouchers) && parsedData.vouchers.length > 0) {
+    for (const v of parsedData.vouchers) {
+      try {
+        const existing = await accDb.vouchers.where('voucher_no').equalsIgnoreCase(v.voucher_no.trim()).first()
+        if (existing) {
+          skippedCount++
+        } else {
+          await createVoucher(v)
+          newCount++
+        }
+      } catch (err) {
+        problems.push({
+          where: `Voucher ${v.voucher_no}`,
+          problem: err.message || 'Error processing voucher',
+          howToFix: 'Check voucher ledger balances',
+        })
+      }
+    }
+  }
+
+  window.dispatchEvent(new Event('accounting-data-updated'))
+  return { newCount, skippedCount, updatedCount, problems }
+}
+

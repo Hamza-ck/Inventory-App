@@ -1,174 +1,185 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
   Search,
+  FileSpreadsheet,
+  Edit3,
   X,
+  AlertCircle,
+  TrendingDown,
+  CheckCircle,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import Nav from '../components/Nav'
+import { accDb, updateStockQty } from '../lib/accountingDb'
+import AdminEditModal from '../components/AdminEditModal'
+
+const DEFAULT_ITEMS = [
+  {
+    id: 1,
+    name: 'iPhone 15 · Clear Case',
+    sku: 'CC-IP15-CLR',
+    category: 'Cases & Covers',
+    current_qty: 6,
+    unit: 'pcs',
+    reorder_threshold: 15,
+    status: 'Low',
+    sales_rate: 350,
+    purchase_rate: 180,
+    isSlowMoving: false,
+  },
+  {
+    id: 2,
+    name: 'Redmi Note 13 · Silicone',
+    sku: 'SL-RN13-BLK',
+    category: 'Cases & Covers',
+    current_qty: 112,
+    unit: 'pcs',
+    reorder_threshold: 20,
+    status: 'Healthy',
+    sales_rate: 250,
+    purchase_rate: 120,
+    isSlowMoving: false,
+  },
+  {
+    id: 3,
+    name: 'Samsung A15 · Flip Cover',
+    sku: 'FC-SA15-BRN',
+    category: 'Cases & Covers',
+    current_qty: 0,
+    unit: 'pcs',
+    reorder_threshold: 10,
+    status: 'Out of stock',
+    sales_rate: 450,
+    purchase_rate: 220,
+    isSlowMoving: true,
+  },
+  {
+    id: 4,
+    name: 'iPhone 15 Pro Max 9D Glass',
+    sku: 'TG-IP15-PRM',
+    category: 'Screen Protectors',
+    current_qty: 8,
+    unit: 'pcs',
+    reorder_threshold: 25,
+    status: 'Low',
+    sales_rate: 199,
+    purchase_rate: 45,
+    isSlowMoving: false,
+  },
+  {
+    id: 5,
+    name: '65W Fast GaN Dual Charger',
+    sku: 'CHG-65W-GAN',
+    category: 'Chargers & Cables',
+    current_qty: 45,
+    unit: 'pcs',
+    reorder_threshold: 15,
+    status: 'Healthy',
+    sales_rate: 1299,
+    purchase_rate: 650,
+    isSlowMoving: false,
+  },
+  {
+    id: 6,
+    name: 'ANC Pro True Wireless Earbuds',
+    sku: 'AUD-TWS-AIR',
+    category: 'Audio',
+    current_qty: 24,
+    unit: 'pcs',
+    reorder_threshold: 10,
+    status: 'Healthy',
+    sales_rate: 1699,
+    purchase_rate: 850,
+    isSlowMoving: false,
+  },
+]
 
 export default function InventoryPage() {
   const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const [filter, setFilter] = useState('All') // 'All' | 'Low stock' | 'Slow moving'
   const [search, setSearch] = useState('')
+  const [items, setItems] = useState(DEFAULT_ITEMS)
   const [adjustModal, setAdjustModal] = useState(null)
   const [newQty, setNewQty] = useState('')
+  const [editingMaterial, setEditingMaterial] = useState(null)
 
-  // Inventory items matching PDF Page 7
-  const [items, setItems] = useState([
-    {
-      id: 1,
-      name: 'iPhone 15 · Clear Case',
-      sku: 'CC-IP15-CLR',
-      qty: 6,
-      unit: 'pcs',
-      threshold: 15,
-      status: 'Low',
-      statusTone: 'bg-[#faece6] text-[#c05423]',
-      barFill: 'bg-[#c05423]',
-      barWidth: '22%',
-      rate: 350,
-      isSlowMoving: false,
-    },
-    {
-      id: 2,
-      name: 'Redmi Note 13 · Silicone',
-      sku: 'SL-RN13-BLK',
-      qty: 112,
-      unit: 'pcs',
-      threshold: 20,
-      status: 'Healthy',
-      statusTone: 'bg-[#e3f3ed] text-[#157a6c]',
-      barFill: 'bg-[#157a6c]',
-      barWidth: '78%',
-      rate: 250,
-      isSlowMoving: false,
-    },
-    {
-      id: 3,
-      name: 'Samsung A15 · Flip Cover',
-      sku: 'FC-SA15-BRN',
-      qty: 0,
-      unit: 'pcs',
-      threshold: 10,
-      status: 'Out of stock',
-      statusTone: 'bg-[#fbeee8] text-[#b84825]',
-      barFill: 'bg-[#b84825]',
-      barWidth: '0%',
-      rate: 450,
-      isSlowMoving: true,
-    },
-    {
-      id: 4,
-      name: 'iPhone 15 Pro Max 9D Glass',
-      sku: 'TG-IP15-PRM',
-      qty: 8,
-      unit: 'pcs',
-      threshold: 25,
-      status: 'Low',
-      statusTone: 'bg-[#faece6] text-[#c05423]',
-      barFill: 'bg-[#c05423]',
-      barWidth: '28%',
-      rate: 199,
-      isSlowMoving: false,
-    },
-    {
-      id: 5,
-      name: '65W Fast GaN Dual Charger',
-      sku: 'CHG-65W-GAN',
-      qty: 1450,
-      unit: 'pcs',
-      threshold: 50,
-      status: 'Healthy',
-      statusTone: 'bg-[#e3f3ed] text-[#157a6c]',
-      barFill: 'bg-[#157a6c]',
-      barWidth: '95%',
-      rate: 1299,
-      isSlowMoving: false,
-    },
-    {
-      id: 6,
-      name: 'Braided Type-C Fast Cable',
-      sku: 'CBL-BRD-TPE',
-      qty: 4800,
-      unit: 'pcs',
-      threshold: 200,
-      status: 'Healthy',
-      statusTone: 'bg-[#e3f3ed] text-[#157a6c]',
-      barFill: 'bg-[#157a6c]',
-      barWidth: '100%',
-      rate: 199,
-      isSlowMoving: false,
-    },
-    {
-      id: 7,
-      name: 'ANC Pro True Wireless Earbuds',
-      sku: 'AUD-TWS-AIR',
-      qty: 1200,
-      unit: 'pcs',
-      threshold: 40,
-      status: 'Healthy',
-      statusTone: 'bg-[#e3f3ed] text-[#157a6c]',
-      barFill: 'bg-[#157a6c]',
-      barWidth: '85%',
-      rate: 1699,
-      isSlowMoving: true,
-    },
-  ])
+  // Load materials from Dexie
+  const loadMaterials = useCallback(async () => {
+    try {
+      const dbMats = await accDb.materials.toArray()
+      if (dbMats && dbMats.length > 0) {
+        setItems(dbMats)
+      } else {
+        setItems(DEFAULT_ITEMS)
+      }
+    } catch {
+      setItems(DEFAULT_ITEMS)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadMaterials()
+    const onUpdate = () => loadMaterials()
+    window.addEventListener('accounting-data-updated', onUpdate)
+    return () => window.removeEventListener('accounting-data-updated', onUpdate)
+  }, [loadMaterials])
+
+  // Dynamic stock calculations
+  const totalStockValue = useMemo(() => {
+    return items.reduce((acc, it) => {
+      const qty = Number(it.current_qty) || 0
+      const rate = Number(it.sales_rate) || Number(it.purchase_rate) || 0
+      return acc + qty * rate
+    }, 0)
+  }, [items])
+
+  const lowStockCount = useMemo(() => {
+    return items.filter((it) => (Number(it.current_qty) || 0) <= (Number(it.reorder_threshold) || 10)).length
+  }, [items])
 
   const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      const matchSearch =
-        item.name.toLowerCase().includes(search.toLowerCase()) ||
-        item.sku.toLowerCase().includes(search.toLowerCase())
+    let list = items
+    if (filter === 'Low stock') {
+      list = list.filter((it) => (Number(it.current_qty) || 0) <= (Number(it.reorder_threshold) || 10))
+    } else if (filter === 'Slow moving') {
+      list = list.filter((it) => it.isSlowMoving || (Number(it.current_qty) || 0) === 0)
+    }
 
-      if (!matchSearch) return false
+    if (!search.trim()) return list
+    const q = search.toLowerCase()
+    return list.filter(
+      (it) =>
+        it.name.toLowerCase().includes(q) ||
+        (it.sku && it.sku.toLowerCase().includes(q))
+    )
+  }, [items, filter, search])
 
-      if (filter === 'Low stock') {
-        return item.status === 'Low' || item.status === 'Out of stock'
-      }
-      if (filter === 'Slow moving') {
-        return item.isSlowMoving
-      }
-      return true
-    })
-  }, [items, search, filter])
-
-  const handleSaveStock = (e) => {
+  // Save Adjusted Stock
+  const handleSaveStock = async (e) => {
     e.preventDefault()
     if (!adjustModal) return
-    const num = Number(newQty)
-    if (isNaN(num)) return
+    const qty = Number(newQty) || 0
 
-    const status = num === 0 ? 'Out of stock' : num <= adjustModal.threshold ? 'Low' : 'Healthy'
-    const statusTone =
-      status === 'Out of stock'
-        ? 'bg-[#fbeee8] text-[#b84825]'
-        : status === 'Low'
-        ? 'bg-[#faece6] text-[#c05423]'
-        : 'bg-[#e3f3ed] text-[#157a6c]'
-
-    const barFill = status === 'Healthy' ? 'bg-[#157a6c]' : 'bg-[#c05423]'
-    const barWidth = num === 0 ? '0%' : num <= adjustModal.threshold ? '25%' : '80%'
-
-    setItems(
-      items.map((it) =>
-        it.id === adjustModal.id
-          ? { ...it, qty: num, status, statusTone, barFill, barWidth }
-          : it
-      )
-    )
-    setAdjustModal(null)
+    try {
+      if (adjustModal.id) {
+        await updateStockQty(adjustModal.id, qty)
+      }
+      setAdjustModal(null)
+      loadMaterials()
+    } catch (err) {
+      alert(`Could not update stock: ${err.message}`)
+    }
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10">
+    <div className="min-h-screen bg-[#f4f7f4] pb-24 lg:pl-64 lg:pb-10 font-sans">
       <Nav />
 
       <main className="mx-auto max-w-2xl px-4 pt-4 sm:px-6 sm:pt-6">
-        {/* Top Header with Back button (PDF Page 7) */}
+        {/* Top Header with Back button and Tally Import button (PDF Page 7) */}
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button
@@ -183,32 +194,42 @@ export default function InventoryPage() {
               Inventory
             </h1>
           </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/tally')}
+            className="flex items-center gap-1.5 rounded-2xl bg-[#0e655d] px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-[#0a4f49] transition active:scale-95"
+            title="Import stock items and rates from Tally"
+          >
+            <FileSpreadsheet size={16} strokeWidth={2.5} />
+            <span>Tally import</span>
+          </button>
         </header>
 
-        {/* 2 Top Metric Cards (PDF Page 7) */}
+        {/* Stock Value & Low Stock Dual Cards (PDF Page 7) */}
         <div className="mb-5 grid grid-cols-2 gap-3 sm:gap-4">
           <div className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs">
             <span className="text-xs font-bold text-[#6a847c]">Stock value</span>
             <strong className="mt-1 block text-[26px] font-extrabold tracking-tight text-[#11382f] sm:text-[32px]">
-              ₹22.6L
+              ₹{(totalStockValue / 100000).toFixed(1)}L
             </strong>
           </div>
 
           <div className="rounded-3xl border border-[#e1e9e3] border-l-4 border-l-[#c25e19] bg-white p-5 shadow-xs">
             <span className="text-xs font-bold text-[#6a847c]">Low stock</span>
             <strong className="mt-1 block text-[26px] font-extrabold tracking-tight text-[#c25e19] sm:text-[32px]">
-              14 items
+              {lowStockCount} items
             </strong>
           </div>
         </div>
 
         {/* Search Phone model or case input (PDF Page 7) */}
-        <div className="mb-4 flex items-center gap-2 rounded-2xl border border-[#dbe6df] bg-white px-3.5 py-2.5 shadow-2xs">
-          <Search size={18} className="text-[#7c978f]" />
+        <div className="mb-4 flex items-center gap-2 rounded-2xl border border-[#dbe6df] bg-white px-3.5 py-2.5 shadow-2xs focus-within:border-[#0e655d] transition">
+          <Search size={18} className="text-[#7c978f] shrink-0" />
           <input
             type="text"
-            className="w-full bg-transparent text-xs font-medium text-[#11382f] outline-none placeholder:text-[#88a098]"
-            placeholder="Search phone model or case"
+            className="w-full bg-transparent text-xs font-semibold text-[#11382f] outline-none placeholder:text-[#88a098]"
+            placeholder="Search phone model, case or SKU..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -234,60 +255,94 @@ export default function InventoryPage() {
 
         {/* Items List (PDF Page 7) */}
         <div className="space-y-3">
-          {filteredItems.map((item) => (
-            <article
-              key={item.id}
-              className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-[16px] font-extrabold text-[#11382f]">
-                    {item.name}
-                  </h2>
-                  <span className="mt-0.5 block font-mono text-xs text-[#718d84]">
-                    SKU {item.sku}
-                  </span>
+          {filteredItems.map((item) => {
+            const qty = Number(item.current_qty) || 0
+            const thresh = Number(item.reorder_threshold) || 10
+            const isLow = qty <= thresh
+            const isZero = qty === 0
+
+            const status = isZero ? 'Out of stock' : isLow ? 'Low' : 'Healthy'
+            const statusTone = isZero
+              ? 'bg-[#fbeee8] text-[#b84825]'
+              : isLow
+              ? 'bg-[#faece6] text-[#c05423]'
+              : 'bg-[#e3f3ed] text-[#157a6c]'
+            const barFill = isZero ? 'bg-[#b84825]' : isLow ? 'bg-[#c05423]' : 'bg-[#157a6c]'
+            const barWidth = isZero ? '0%' : `${Math.min(100, Math.max(10, Math.round((qty / (thresh * 3)) * 100)))}%`
+
+            return (
+              <article
+                key={item.id}
+                className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-[16px] font-extrabold text-[#11382f]">
+                      {item.name}
+                    </h2>
+                    <div className="mt-0.5 flex items-center gap-2 font-mono text-xs text-[#718d84]">
+                      <span>SKU {item.sku}</span>
+                      <span>· ₹{item.sales_rate || item.purchase_rate || 0}</span>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <strong className="block text-[17px] font-extrabold text-[#11382f]">
+                      {qty} {item.unit || 'pcs'}
+                    </strong>
+                    <span
+                      className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${statusTone}`}
+                    >
+                      {status}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="text-right">
-                  <strong className="block text-[17px] font-extrabold text-[#11382f]">
-                    {item.qty} {item.unit}
-                  </strong>
-                  <span
-                    className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${item.statusTone}`}
+                {/* Progress bar matching PDF */}
+                <div className="mt-4 flex h-2 w-full overflow-hidden rounded-full bg-[#e8ecea]">
+                  <div
+                    className={`h-full rounded-full ${barFill} transition-all`}
+                    style={{ width: barWidth }}
+                  />
+                </div>
+
+                <div className="mt-3 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setEditingMaterial(item)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#cfded6] bg-[#f8faf9] px-2.5 py-1 text-[11px] font-bold text-[#0e655d] hover:bg-[#ebf3ef]"
+                    title="Admin Edit item master"
                   >
-                    {item.status}
-                  </span>
-                </div>
-              </div>
+                    <Edit3 size={12} />
+                    <span>Edit item</span>
+                  </button>
 
-              {/* Progress bar matching PDF */}
-              <div className="mt-4 flex h-2 w-full overflow-hidden rounded-full bg-[#e8ecea]">
-                <div
-                  className={`h-full rounded-full ${item.barFill} transition-all`}
-                  style={{ width: item.barWidth }}
-                />
-              </div>
-
-              {isAdmin && (
-                <div className="mt-3 flex items-center justify-end">
                   <button
                     type="button"
                     onClick={() => {
                       setAdjustModal(item)
-                      setNewQty(String(item.qty))
+                      setNewQty(String(qty))
                     }}
                     className="text-[11px] font-bold text-[#0e655d] hover:underline"
                   >
                     Adjust stock quantity
                   </button>
                 </div>
-              )}
-            </article>
-          ))}
+              </article>
+            )
+          })}
         </div>
 
-        {/* Adjust Stock Modal */}
+        {/* Admin Edit Modal */}
+        <AdminEditModal
+          isOpen={Boolean(editingMaterial)}
+          onClose={() => setEditingMaterial(null)}
+          type="material"
+          item={editingMaterial}
+          onSaved={() => loadMaterials()}
+        />
+
+        {/* Adjust Stock Quantity Modal */}
         {adjustModal && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs"
@@ -295,7 +350,7 @@ export default function InventoryPage() {
           >
             <form
               onSubmit={handleSaveStock}
-              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
+              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl animate-in zoom-in-95"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between pb-3 border-b border-[#e5ebe7]">
@@ -322,13 +377,13 @@ export default function InventoryPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-[#44655b] mb-1">
-                    New Current Quantity ({adjustModal.unit})
+                    New Current Quantity ({adjustModal.unit || 'pcs'})
                   </label>
                   <input
                     type="number"
                     min="0"
                     required
-                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] outline-none focus:border-[#0e655d]"
+                    className="w-full rounded-xl border border-[#d8e3de] px-3 py-2 text-xs text-[#11382f] font-bold outline-none focus:border-[#0e655d]"
                     value={newQty}
                     onChange={(e) => setNewQty(e.target.value)}
                   />
@@ -344,7 +399,7 @@ export default function InventoryPage() {
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-[#0e655d] py-2.5 text-xs font-bold text-white shadow-xs"
+                  className="rounded-xl bg-[#0e655d] py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#0a4f49]"
                 >
                   Save Stock
                 </button>

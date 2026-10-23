@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
   Users,
@@ -14,25 +14,16 @@ import {
   Activity,
   SlidersHorizontal,
   LogOut,
-  ChevronRight,
-  ShieldCheck,
-  Building2,
   X,
   FileSpreadsheet,
-  Receipt,
   RotateCcw,
-  Plus,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import VoucherModal from './VoucherModal'
 
 export default function Nav() {
-  const { isAdmin, isOwner, role, setRole, shopName, signOut, user } = useAuth()
-  const [voucherOpen, setVoucherOpen] = useState(false)
+  const { isAdmin, isOwner, setRole, shopName, signOut } = useAuth()
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
   const [roleModalOpen, setRoleModalOpen] = useState(false)
-  const location = useLocation()
-  const navigate = useNavigate()
 
   // Overview links matching PDF Page 5 & Page 11
   const overviewLinks = [
@@ -108,14 +99,13 @@ export default function Nav() {
 
         {/* Navigation Groups */}
         <div className="flex-1 overflow-y-auto space-y-5 pr-1">
-          <button
-            type="button"
-            onClick={() => setVoucherOpen(true)}
-            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-[#0f7d6f] hover:bg-[#139181] text-white py-2.5 px-3 text-xs font-extrabold shadow-sm transition active:scale-98"
+          <NavLink
+            to="/tally"
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-[#0f7d6f] hover:bg-[#139181] text-white py-2.5 px-3 text-xs font-extrabold shadow-sm transition active:scale-98 no-underline"
           >
-            <Plus size={16} strokeWidth={2.5} />
-            <span>+ New Invoice</span>
-          </button>
+            <FileSpreadsheet size={16} strokeWidth={2.2} />
+            <span>Tally XML Import</span>
+          </NavLink>
 
           <div>
             <p className="mb-2 px-3 text-[10px] font-extrabold tracking-[1.2px] text-[#78a89a]">
@@ -274,16 +264,14 @@ export default function Nav() {
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                setMobileMoreOpen(false)
-                setVoucherOpen(true)
-              }}
-              className="mt-3 w-full flex items-center justify-center gap-2 rounded-2xl bg-[#0e655d] text-white p-3 text-xs font-extrabold shadow-xs transition active:scale-98"
+            <NavLink
+              to="/tally"
+              onClick={() => setMobileMoreOpen(false)}
+              className="mt-3 w-full flex items-center justify-center gap-2 rounded-2xl bg-[#0e655d] text-white p-3 text-xs font-extrabold shadow-xs transition active:scale-98 no-underline"
             >
-              <Plus size={16} strokeWidth={2.5} /> + Create New Sales Invoice
-            </button>
+              <FileSpreadsheet size={16} strokeWidth={2.2} />
+              <span>Tally XML Import</span>
+            </NavLink>
             <div className="mt-4 pt-3 border-t border-[#e5ece8] flex items-center justify-between">
               <span className="text-[11px] text-[#6e847c]">Logged in as Owner</span>
               <button
@@ -376,13 +364,6 @@ export default function Nav() {
           </div>
         </div>
       )}
-
-      {/* Quick Voucher Modal for adding transactions */}
-      <VoucherModal
-        isOpen={voucherOpen}
-        onClose={() => setVoucherOpen(false)}
-        onSuccess={() => window.dispatchEvent(new Event('accounting-data-updated'))}
-      />
     </>
   )
 }
