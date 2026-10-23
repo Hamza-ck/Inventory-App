@@ -123,20 +123,39 @@ export default function SettingsControlPage() {
     }
   }
 
-  const handleTestWhatsAppSummary = () => {
-    const summaryText = encodeURIComponent(
-      `📊 *Daily Business Summary - ${localShopName}*\n\n` +
-      `📅 *Date*: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}\n` +
-      `💰 *Today Sales*: ₹1.42L (▲ 12%)\n` +
-      `📈 *Profit*: ₹21.4K\n` +
-      `💳 *Expenses*: ₹9.8K\n` +
-      `👥 *Top Debtor Due*: Rahul Mobile Hub (₹1,84,200)\n` +
-      `📦 *Stock Value*: ₹22.6L (14 items low)\n\n` +
-      `Have a great evening! ✨`
-    )
-    window.open(`https://wa.me/?text=${summaryText}`, '_blank')
-    setWhatsappSent(true)
-    setTimeout(() => setWhatsappSent(false), 3000)
+  const handleTestWhatsAppSummary = async () => {
+    try {
+      const allVouchers = await accDb.vouchers.toArray()
+      const allParties = await accDb.parties.toArray()
+      const allMaterials = await accDb.materials.toArray()
+
+      const todayStr = new Date().toISOString().slice(0, 10)
+      const todaySales = allVouchers
+        .filter((v) => v.type === 'Sales' && (v.date || '').startsWith(todayStr))
+        .reduce((sum, v) => sum + (Number(v.total_amount) || 0), 0)
+
+      const debtors = allParties.filter((p) => (p.role === 'customer' || p.role === 'debtor') && Number(p.current_balance) > 0)
+      const topDebtor = debtors.sort((a, b) => Number(b.current_balance) - Number(a.current_balance))[0]
+
+      const stockVal = allMaterials.reduce(
+        (sum, m) => sum + (Number(m.current_qty) || 0) * (Number(m.purchase_rate || m.sales_rate) || 0),
+        0
+      )
+
+      const summaryText = encodeURIComponent(
+        `📊 *Daily Business Summary - ${localShopName}*\n\n` +
+        `📅 *Date*: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}\n` +
+        `💰 *Today Sales*: ₹${todaySales.toLocaleString('en-IN')}\n` +
+        (topDebtor ? `👥 *Top Debtor Due*: ${topDebtor.name} (₹${Number(topDebtor.current_balance).toLocaleString('en-IN')})\n` : `👥 *Debtors Due*: ₹0 pending\n`) +
+        `📦 *Stock Value*: ₹${stockVal.toLocaleString('en-IN')}\n\n` +
+        `Have a great evening! ✨`
+      )
+      window.open(`https://wa.me/?text=${summaryText}`, '_blank')
+      setWhatsappSent(true)
+      setTimeout(() => setWhatsappSent(false), 3000)
+    } catch (err) {
+      console.error('Error generating WhatsApp summary:', err)
+    }
   }
 
   return (

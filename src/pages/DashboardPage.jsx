@@ -4,20 +4,9 @@ import {
   Download,
   Eye,
   EyeOff,
-  GripVertical,
-  Plus,
   ArrowUpRight,
-  TrendingUp,
-  TrendingDown,
-  Calendar,
-  Share2,
   Check,
-  Building2,
   Sliders,
-  Send,
-  MessageCircle,
-  Clock,
-  Sparkles,
 } from 'lucide-react'
 import {
   BarChart,
@@ -34,7 +23,6 @@ import Nav from '../components/Nav'
 
 export default function DashboardPage() {
   const {
-    role,
     isAdmin,
     isOwner,
     setRole,
@@ -71,10 +59,11 @@ export default function DashboardPage() {
 
     async function loadData() {
       try {
-        const [parties, materials, ledgers] = await Promise.all([
+        const [parties, materials, ledgers, vouchers] = await Promise.all([
           accDb.parties.toArray(),
           accDb.materials.toArray(),
           accDb.ledgers.toArray(),
+          accDb.vouchers.toArray(),
         ])
         if (!active) return
 
@@ -95,6 +84,67 @@ export default function DashboardPage() {
           .filter((l) => (l.group || '').toLowerCase().includes('loans & advances (asset)'))
           .reduce((s, l) => s + (Number(l.current_balance) || 0), 0)
 
+        // Sales and expenses calculation from real vouchers & ledgers
+        const salesVouchers = vouchers.filter((v) => v.voucher_type === 'sales')
+        const todayStr = new Date().toISOString().slice(0, 10)
+        const now = new Date()
+        const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10)
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+
+        const salesToday = salesVouchers
+          .filter((v) => (v.date || '').slice(0, 10) === todayStr)
+          .reduce((s, v) => s + (Number(v.amount) || 0), 0)
+
+        const salesWeek = salesVouchers
+          .filter((v) => (v.date || '').slice(0, 10) >= weekAgo)
+          .reduce((s, v) => s + (Number(v.amount) || 0), 0)
+
+        const salesMonth = salesVouchers
+          .filter((v) => (v.date || '').slice(0, 10) >= monthStart)
+          .reduce((s, v) => s + (Number(v.amount) || 0), 0)
+
+        // Expenses from ledgers & expense payment vouchers
+        const expenseLedgerSum = ledgers
+          .filter((l) => (l.category || '').toLowerCase() === 'expense' || (l.group || '').toLowerCase().includes('expense'))
+          .reduce((s, l) => s + (Number(l.current_balance) || 0), 0)
+
+        const paymentVouchersSum = vouchers
+          .filter((v) => v.voucher_type === 'payment')
+          .reduce((s, v) => s + (Number(v.amount) || 0), 0)
+
+        const totalExpenses = Math.max(expenseLedgerSum, paymentVouchersSum)
+
+        // 7-day sales breakdown
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        const last7 = []
+        let last7Sum = 0
+        let maxDaySale = 0
+
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now.getTime() - i * 86400000)
+          const dStr = d.toISOString().slice(0, 10)
+          const dayName = dayNames[d.getDay()]
+          const dayTotal = salesVouchers
+            .filter((v) => (v.date || '').slice(0, 10) === dStr)
+            .reduce((s, v) => s + (Number(v.amount) || 0), 0)
+
+          if (dayTotal > maxDaySale) maxDaySale = dayTotal
+          last7Sum += dayTotal
+          last7.push({
+            day: dayName,
+            date: dStr,
+            amount: dayTotal,
+            display: formatMoney(dayTotal),
+            isPeak: false,
+          })
+        }
+
+        if (maxDaySale > 0) {
+          last7.forEach((item) => {
+            if (item.amount === maxDaySale) item.isPeak = true
+          })
+        }
+
         setLiveMetrics({
           debtorsSum,
           debtorsCount: debtors.length,
@@ -102,6 +152,17 @@ export default function DashboardPage() {
           creditorsCount: creditors.length,
           stockSum,
           netLoans: Math.max(0, loansOwed - advGiven),
+          salesToday,
+          salesWeek,
+          salesMonth,
+          expensesToday: Math.round(totalExpenses / 30),
+          expensesWeek: Math.round(totalExpenses / 4),
+          expensesMonth: totalExpenses,
+          profitToday: Math.max(0, salesToday - Math.round(totalExpenses / 30)),
+          profitWeek: Math.max(0, salesWeek - Math.round(totalExpenses / 4)),
+          profitMonth: Math.max(0, salesMonth - totalExpenses),
+          sales7Days: last7,
+          sales7DaysTotal: last7Sum,
         })
 
         const topDebtors = debtors
@@ -120,13 +181,11 @@ export default function DashboardPage() {
                   ? 'bg-[#e2f3ec] text-[#0d786d]'
                   : 'bg-[#e3f2ec] text-[#136b60]',
               amount: `₹${(Number(d.current_balance) || 0).toLocaleString('en-IN')}`,
-              phone: d.phone || '+919876543210',
+              phone: d.phone || '',
             }
           })
 
-        if (topDebtors.length > 0) {
-          setLiveDebtors(topDebtors)
-        }
+        setLiveDebtors(topDebtors)
       } catch {
         // fallback
       }
@@ -141,40 +200,49 @@ export default function DashboardPage() {
     }
   }, [])
 
-  // Metrics matching PDF specification, enhanced with live Dexie DB data
+  // Metrics dynamically derived from live DB records
   const metrics = useMemo(() => {
-    const debtorsVal = liveMetrics?.debtorsSum ? formatMoney(liveMetrics.debtorsSum) : '₹8.4L'
-    const debtorsDetail = `They owe you · ${liveMetrics?.debtorsCount || 23}`
-    const creditorsVal = liveMetrics?.creditorsSum ? formatMoney(liveMetrics.creditorsSum) : '₹5.1L'
-    const creditorsDetail = `You owe · ${liveMetrics?.creditorsCount || 9}`
-    const stockVal = liveMetrics?.stockSum ? formatMoney(liveMetrics.stockSum) : '₹22.6L'
-    const loansVal = liveMetrics?.netLoans ? formatMoney(liveMetrics.netLoans) : '₹3.0L'
+    const debtorsVal = formatMoney(liveMetrics?.debtorsSum || 0)
+    const debtorsDetail = `They owe you · ${liveMetrics?.debtorsCount || 0}`
+    const creditorsVal = formatMoney(liveMetrics?.creditorsSum || 0)
+    const creditorsDetail = `You owe · ${liveMetrics?.creditorsCount || 0}`
+    const stockVal = formatMoney(liveMetrics?.stockSum || 0)
+    const loansVal = formatMoney(liveMetrics?.netLoans || 0)
 
     if (period === 'Today') {
+      const sVal = liveMetrics?.salesToday || 0
+      const pVal = liveMetrics?.profitToday || 0
+      const eVal = liveMetrics?.expensesToday || 0
       return {
-        sales: { value: '₹1.42L', diff: '▲ 12% vs yesterday', isPositive: true },
-        profit: { value: '₹21.4K', diff: '▲ 8% vs yesterday', isPositive: true },
-        expenses: { value: '₹9.8K', diff: '▼ 4% vs yesterday', isPositive: false },
+        sales: { value: formatMoney(sVal), diff: sVal > 0 ? 'Today revenue' : 'No sales today', isPositive: true },
+        profit: { value: formatMoney(pVal), diff: pVal > 0 ? 'Net profit' : 'No profit yet', isPositive: true },
+        expenses: { value: formatMoney(eVal), diff: eVal > 0 ? 'Today expenses' : 'No expenses', isPositive: false },
         debtors: { value: debtorsVal, detail: debtorsDetail },
         creditors: { value: creditorsVal, detail: creditorsDetail },
         inventory: { value: stockVal, detail: 'Stock value' },
         loans: { value: loansVal, detail: 'Net balance' },
       }
     } else if (period === 'Week') {
+      const sVal = liveMetrics?.salesWeek || 0
+      const pVal = liveMetrics?.profitWeek || 0
+      const eVal = liveMetrics?.expensesWeek || 0
       return {
-        sales: { value: '₹9.8L', diff: '▲ 14% vs last week', isPositive: true },
-        profit: { value: '₹1.65L', diff: '▲ 10% vs last week', isPositive: true },
-        expenses: { value: '₹68K', diff: '▼ 2% vs last week', isPositive: false },
+        sales: { value: formatMoney(sVal), diff: sVal > 0 ? 'Last 7 days' : 'No sales this week', isPositive: true },
+        profit: { value: formatMoney(pVal), diff: pVal > 0 ? 'Net profit' : 'No profit', isPositive: true },
+        expenses: { value: formatMoney(eVal), diff: eVal > 0 ? 'Weekly expenses' : 'No expenses', isPositive: false },
         debtors: { value: debtorsVal, detail: debtorsDetail },
         creditors: { value: creditorsVal, detail: creditorsDetail },
         inventory: { value: stockVal, detail: 'Stock value' },
         loans: { value: loansVal, detail: 'Net balance' },
       }
     } else {
+      const sVal = liveMetrics?.salesMonth || 0
+      const pVal = liveMetrics?.profitMonth || 0
+      const eVal = liveMetrics?.expensesMonth || 0
       return {
-        sales: { value: '₹41.2L', diff: '▲ 18% vs last month', isPositive: true },
-        profit: { value: '₹6.8L', diff: '▲ 15% vs last month', isPositive: true },
-        expenses: { value: '₹3.1L', diff: '▼ 4% vs last month', isPositive: false },
+        sales: { value: formatMoney(sVal), diff: sVal > 0 ? 'This month' : 'No sales this month', isPositive: true },
+        profit: { value: formatMoney(pVal), diff: pVal > 0 ? 'Net profit' : 'No profit', isPositive: true },
+        expenses: { value: formatMoney(eVal), diff: eVal > 0 ? 'Monthly expenses' : 'No expenses', isPositive: false },
         debtors: { value: debtorsVal, detail: debtorsDetail },
         creditors: { value: creditorsVal, detail: creditorsDetail },
         inventory: { value: stockVal, detail: 'Stock value' },
@@ -183,48 +251,20 @@ export default function DashboardPage() {
     }
   }, [period, liveMetrics])
 
-  // 7-day Sales Bar Chart data (PDF Page 3 & 5)
-  const sales7Days = [
-    { day: 'Mon', amount: 110000, display: '₹1.1L' },
-    { day: 'Tue', amount: 140000, display: '₹1.4L' },
-    { day: 'Wed', amount: 90000, display: '₹0.9L' },
-    { day: 'Thu', amount: 160000, display: '₹1.6L' },
-    { day: 'Fri', amount: 130000, display: '₹1.3L' },
-    { day: 'Sat', amount: 210000, display: '₹2.1L', isPeak: true },
-    { day: 'Sun', amount: 140000, display: '₹1.4L' },
+  // 7-day Sales Bar Chart data
+  const sales7Days = liveMetrics?.sales7Days || [
+    { day: 'Mon', amount: 0, display: '₹0' },
+    { day: 'Tue', amount: 0, display: '₹0' },
+    { day: 'Wed', amount: 0, display: '₹0' },
+    { day: 'Thu', amount: 0, display: '₹0' },
+    { day: 'Fri', amount: 0, display: '₹0' },
+    { day: 'Sat', amount: 0, display: '₹0' },
+    { day: 'Sun', amount: 0, display: '₹0' },
   ]
+  const sales7DaysTotal = liveMetrics?.sales7DaysTotal || 0
 
-  // Money to collect list (PDF Page 5)
-  const moneyToCollect = liveDebtors || [
-    {
-      name: 'Rahul Mobile Hub',
-      age: '60d+',
-      ageTone: 'bg-[#fcebe6] text-[#ba3e29]',
-      amount: '₹1,84,200',
-      phone: '+919876543210',
-    },
-    {
-      name: 'City Gadget Point',
-      age: '31–60d',
-      ageTone: 'bg-[#e2f3ec] text-[#0d786d]',
-      amount: '₹96,500',
-      phone: '+919811234567',
-    },
-    {
-      name: 'Sen Telecom',
-      age: '0–30d',
-      ageTone: 'bg-[#e3f2ec] text-[#136b60]',
-      amount: '₹71,900',
-      phone: '+919830123456',
-    },
-    {
-      name: 'Mitra Cover House',
-      age: '0–30d',
-      ageTone: 'bg-[#e3f2ec] text-[#136b60]',
-      amount: '₹48,300',
-      phone: '+919845098765',
-    },
-  ]
+  // Money to collect list
+  const moneyToCollect = liveDebtors || []
 
   const handleSendReminder = (customer) => {
     const text = encodeURIComponent(
@@ -675,7 +715,7 @@ export default function DashboardPage() {
                 <span className="text-xs text-[#718b82]">Daily revenue trend</span>
               </div>
               <strong className="text-base font-extrabold text-[#0e655d]">
-                ₹9.8L
+                {formatMoney(sales7DaysTotal)}
               </strong>
             </div>
 
@@ -736,35 +776,52 @@ export default function DashboardPage() {
             </div>
 
             <div className="space-y-3">
-              {moneyToCollect.map((item) => (
-                <div
-                  key={item.name}
-                  className="flex items-center justify-between rounded-2xl border border-[#edf3f0] bg-[#fafcfb] p-3 transition hover:bg-[#f3f8f5]"
-                >
-                  <div className="min-w-0 pr-2">
-                    <div className="flex items-center gap-2">
-                      <strong className="block truncate text-xs font-bold text-[#143d35]">
-                        {item.name}
-                      </strong>
-                      <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${item.ageTone}`}>
-                        {item.age}
+              {moneyToCollect.length > 0 ? (
+                moneyToCollect.map((item) => (
+                  <div
+                    key={item.name}
+                    className="flex items-center justify-between rounded-2xl border border-[#edf3f0] bg-[#fafcfb] p-3 transition hover:bg-[#f3f8f5]"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="flex items-center gap-2">
+                        <strong className="block truncate text-xs font-bold text-[#143d35]">
+                          {item.name}
+                        </strong>
+                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${item.ageTone}`}>
+                          {item.age}
+                        </span>
+                      </div>
+                      <span className="block text-[13px] font-extrabold text-[#173a32] mt-0.5">
+                        {item.amount}
                       </span>
                     </div>
-                    <span className="block text-[13px] font-extrabold text-[#173a32] mt-0.5">
-                      {item.amount}
-                    </span>
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleSendReminder(item)}
-                    className="flex items-center gap-1 rounded-xl border border-[#cbe3d9] bg-white px-3 py-1.5 text-xs font-bold text-[#0e655d] shadow-2xs hover:bg-[#0e655d] hover:text-white transition active:scale-95"
+                    <button
+                      type="button"
+                      onClick={() => handleSendReminder(item)}
+                      className="flex items-center gap-1 rounded-xl border border-[#cbe3d9] bg-white px-3 py-1.5 text-xs font-bold text-[#0e655d] shadow-2xs hover:bg-[#0e655d] hover:text-white transition active:scale-95"
+                    >
+                      <MessageCircle size={13} />
+                      {remindSent === item.name ? 'Opened!' : 'Remind'}
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center rounded-2xl border border-dashed border-[#dce6e1] p-4">
+                  <p className="text-xs font-bold text-[#143d35]">
+                    No outstanding collections
+                  </p>
+                  <p className="mt-1 text-[11px] text-[#78968d]">
+                    Import customer accounts &amp; vouchers from Tally to see aging receivables.
+                  </p>
+                  <Link
+                    to="/tally"
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-[#0e655d] px-3.5 py-1.5 text-xs font-extrabold text-white no-underline shadow-xs hover:bg-[#0a4f49]"
                   >
-                    <MessageCircle size={13} />
-                    {remindSent === item.name ? 'Opened!' : 'Remind'}
-                  </button>
+                    Import from Tally
+                  </Link>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </section>

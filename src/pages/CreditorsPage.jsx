@@ -13,54 +13,11 @@ import Nav from '../components/Nav'
 import { accDb } from '../lib/accountingDb'
 import AdminEditModal from '../components/AdminEditModal'
 
-const DEFAULT_SUPPLIERS = [
-  {
-    id: 1,
-    name: 'Metro Steel and Hardware',
-    next_payment: '20 Oct',
-    current_balance: 192000,
-    due_status: 'Due in 1d',
-    due_days: 1,
-    phone: '+919821099887',
-    due_bucket: 'Due now',
-  },
-  {
-    id: 2,
-    name: 'Supreme Fabrics Mill',
-    next_payment: '02 Nov',
-    current_balance: 130500,
-    due_status: 'Due in 14d',
-    due_days: 14,
-    phone: '+919876543210',
-    due_bucket: 'Next 15d',
-  },
-  {
-    id: 3,
-    name: 'Bright Cases Wholesale',
-    next_payment: '12 Nov',
-    current_balance: 86200,
-    due_status: 'Due in 24d',
-    due_days: 24,
-    phone: '+919831188776',
-    due_bucket: 'Later',
-  },
-  {
-    id: 4,
-    name: 'Universal Displays Ltd',
-    next_payment: '25 Nov',
-    current_balance: 101300,
-    due_status: 'Due in 37d',
-    due_days: 37,
-    phone: '+919840033221',
-    due_bucket: 'Later',
-  },
-]
-
 export default function CreditorsPage() {
   const { shopName } = useAuth()
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
-  const [suppliers, setSuppliers] = useState(DEFAULT_SUPPLIERS)
+  const [suppliers, setSuppliers] = useState([])
   const [editingCreditor, setEditingCreditor] = useState(null)
 
   // Load suppliers from Dexie
@@ -70,10 +27,10 @@ export default function CreditorsPage() {
       if (dbParties && dbParties.length > 0) {
         setSuppliers(dbParties)
       } else {
-        setSuppliers(DEFAULT_SUPPLIERS)
+        setSuppliers([])
       }
     } catch {
-      setSuppliers(DEFAULT_SUPPLIERS)
+      setSuppliers([])
     }
   }, [])
 
@@ -224,74 +181,83 @@ export default function CreditorsPage() {
 
         {/* Supplier Cards List (PDF Page 6) */}
         <div className="space-y-3">
-          {filteredSuppliers.map((supp) => {
-            const bal = Number(supp.current_balance) || 0
-            const isDueNow = (Number(supp.due_days) || 15) <= 1
+          {filteredSuppliers.length > 0 ? (
+            filteredSuppliers.map((supp) => {
+              const bal = Number(supp.current_balance) || 0
+              const isDueNow = (Number(supp.due_days) || 15) <= 1
 
-            return (
-              <article
-                key={supp.id}
-                className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h2 className="text-[16px] font-extrabold text-[#11382f]">
-                      {supp.name}
-                    </h2>
-                    <span className="mt-0.5 block text-xs text-[#718d84]">
-                      Next payment {supp.next_payment || 'Soon'}
-                    </span>
+              return (
+                <article
+                  key={supp.id}
+                  className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h2 className="text-[16px] font-extrabold text-[#11382f]">
+                        {supp.name}
+                      </h2>
+                      <span className="mt-0.5 block text-xs text-[#718d84]">
+                        Next payment {supp.next_payment || 'Soon'}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <strong className="block text-[17px] font-extrabold text-[#c25e19]">
+                        ₹{bal.toLocaleString('en-IN')}
+                      </strong>
+                      <span
+                        className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${
+                          isDueNow
+                            ? 'bg-[#fceee9] text-[#b84628]'
+                            : 'bg-[#e3f3ec] text-[#0f7366]'
+                        }`}
+                      >
+                        {supp.due_status || (isDueNow ? 'Due now' : `Due in ${supp.due_days || 14}d`)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <strong className="block text-[17px] font-extrabold text-[#c25e19]">
-                      ₹{bal.toLocaleString('en-IN')}
-                    </strong>
-                    <span
-                      className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${
-                        isDueNow
-                          ? 'bg-[#fceee9] text-[#b84628]'
-                          : 'bg-[#e3f3ec] text-[#0f7366]'
-                      }`}
-                    >
-                      {supp.due_status || (isDueNow ? 'Due now' : `Due in ${supp.due_days || 14}d`)}
-                    </span>
-                  </div>
-                </div>
 
-                {/* Action buttons */}
-                <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-                  {supp.phone && (
-                    <a
-                      href={`tel:${supp.phone}`}
-                      className="flex items-center gap-1.5 rounded-xl border border-[#cbe1d7] px-3 py-1.5 text-xs font-bold text-[#145347] no-underline hover:bg-[#eef7f3] transition"
-                    >
-                      <Phone size={13} /> Call
-                    </a>
-                  )}
+                  {/* Action buttons */}
+                  <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                    {supp.phone && (
+                      <a
+                        href={`tel:${supp.phone}`}
+                        className="flex items-center gap-1.5 rounded-xl border border-[#cbe1d7] px-3 py-1.5 text-xs font-bold text-[#145347] no-underline hover:bg-[#eef7f3] transition"
+                      >
+                        <Phone size={13} /> Call
+                      </a>
+                    )}
 
-                  {supp.phone && (
+                    {supp.phone && (
+                      <button
+                        type="button"
+                        onClick={() => handleWhatsAppNotify(supp)}
+                        className="flex items-center gap-1.5 rounded-xl border border-[#cbe1d7] px-3 py-1.5 text-xs font-bold text-[#145347] hover:bg-[#eef7f3] transition"
+                      >
+                        <MessageCircle size={13} /> WhatsApp
+                      </button>
+                    )}
+
                     <button
                       type="button"
-                      onClick={() => handleWhatsAppNotify(supp)}
-                      className="flex items-center gap-1.5 rounded-xl border border-[#cbe1d7] px-3 py-1.5 text-xs font-bold text-[#145347] hover:bg-[#eef7f3] transition"
+                      onClick={() => setEditingCreditor(supp)}
+                      className="flex items-center gap-1.5 rounded-xl border border-[#0e655d]/30 bg-[#f0f9f5] px-3.5 py-1.5 text-xs font-bold text-[#0e655d] hover:bg-[#e2f3ec] transition active:scale-95"
+                      title="Admin edit supplier details"
                     >
-                      <MessageCircle size={13} /> WhatsApp
+                      <Edit3 size={13} />
+                      <span>Edit</span>
                     </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setEditingCreditor(supp)}
-                    className="flex items-center gap-1.5 rounded-xl border border-[#0e655d]/30 bg-[#f0f9f5] px-3.5 py-1.5 text-xs font-bold text-[#0e655d] hover:bg-[#e2f3ec] transition active:scale-95"
-                    title="Admin edit supplier details"
-                  >
-                    <Edit3 size={13} />
-                    <span>Edit</span>
-                  </button>
-                </div>
-              </article>
-            )
-          })}
+                  </div>
+                </article>
+              )
+            })
+          ) : (
+            <div className="rounded-3xl border border-[#e1e9e3] bg-white p-8 text-center">
+              <p className="text-sm font-bold text-[#11382f]">No supplier accounts found</p>
+              <p className="text-xs text-[#6e8a81] mt-1">
+                Import Sundry Creditors from Tally XML to track payables.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Admin Edit Modal for Creditors */}

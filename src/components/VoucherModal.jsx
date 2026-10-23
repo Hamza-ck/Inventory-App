@@ -26,8 +26,6 @@ export default function VoucherModal({
   onSuccess,
   onSaveAndPrint,
 }) {
-  const { shopName } = useAuth()
-
   // Form State
   const [voucherNo, setVoucherNo] = useState('')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -537,14 +535,11 @@ export default function VoucherModal({
               </div>
             </div>
 
-            {/* Quick Customer Selection Chips from PDF */}
+            {/* Quick Customer Selection Chips */}
             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
               <span className="text-[10px] font-semibold text-[#7c968e] mr-1">Frequent:</span>
               {[
-                { name: 'Rahul Mobile Hub', phone: '+919876543210' },
-                { name: 'City Gadget Point', phone: '+919811234567' },
-                { name: 'Sen Telecom', phone: '+919830123456' },
-                { name: 'Mitra Cover House', phone: '+919845098765' },
+                ...parties.slice(0, 4).map((p) => ({ name: p.name, phone: p.phone || '' })),
                 { name: 'Walk-in customer', phone: '' },
               ].map((cust) => (
                 <button

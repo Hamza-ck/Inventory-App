@@ -15,93 +15,12 @@ import Nav from '../components/Nav'
 import { accDb, updateStockQty } from '../lib/accountingDb'
 import AdminEditModal from '../components/AdminEditModal'
 
-const DEFAULT_ITEMS = [
-  {
-    id: 1,
-    name: 'iPhone 15 · Clear Case',
-    sku: 'CC-IP15-CLR',
-    category: 'Cases & Covers',
-    current_qty: 6,
-    unit: 'pcs',
-    reorder_threshold: 15,
-    status: 'Low',
-    sales_rate: 350,
-    purchase_rate: 180,
-    isSlowMoving: false,
-  },
-  {
-    id: 2,
-    name: 'Redmi Note 13 · Silicone',
-    sku: 'SL-RN13-BLK',
-    category: 'Cases & Covers',
-    current_qty: 112,
-    unit: 'pcs',
-    reorder_threshold: 20,
-    status: 'Healthy',
-    sales_rate: 250,
-    purchase_rate: 120,
-    isSlowMoving: false,
-  },
-  {
-    id: 3,
-    name: 'Samsung A15 · Flip Cover',
-    sku: 'FC-SA15-BRN',
-    category: 'Cases & Covers',
-    current_qty: 0,
-    unit: 'pcs',
-    reorder_threshold: 10,
-    status: 'Out of stock',
-    sales_rate: 450,
-    purchase_rate: 220,
-    isSlowMoving: true,
-  },
-  {
-    id: 4,
-    name: 'iPhone 15 Pro Max 9D Glass',
-    sku: 'TG-IP15-PRM',
-    category: 'Screen Protectors',
-    current_qty: 8,
-    unit: 'pcs',
-    reorder_threshold: 25,
-    status: 'Low',
-    sales_rate: 199,
-    purchase_rate: 45,
-    isSlowMoving: false,
-  },
-  {
-    id: 5,
-    name: '65W Fast GaN Dual Charger',
-    sku: 'CHG-65W-GAN',
-    category: 'Chargers & Cables',
-    current_qty: 45,
-    unit: 'pcs',
-    reorder_threshold: 15,
-    status: 'Healthy',
-    sales_rate: 1299,
-    purchase_rate: 650,
-    isSlowMoving: false,
-  },
-  {
-    id: 6,
-    name: 'ANC Pro True Wireless Earbuds',
-    sku: 'AUD-TWS-AIR',
-    category: 'Audio',
-    current_qty: 24,
-    unit: 'pcs',
-    reorder_threshold: 10,
-    status: 'Healthy',
-    sales_rate: 1699,
-    purchase_rate: 850,
-    isSlowMoving: false,
-  },
-]
-
 export default function InventoryPage() {
   const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const [filter, setFilter] = useState('All') // 'All' | 'Low stock' | 'Slow moving'
   const [search, setSearch] = useState('')
-  const [items, setItems] = useState(DEFAULT_ITEMS)
+  const [items, setItems] = useState([])
   const [adjustModal, setAdjustModal] = useState(null)
   const [newQty, setNewQty] = useState('')
   const [editingMaterial, setEditingMaterial] = useState(null)
@@ -113,10 +32,10 @@ export default function InventoryPage() {
       if (dbMats && dbMats.length > 0) {
         setItems(dbMats)
       } else {
-        setItems(DEFAULT_ITEMS)
+        setItems([])
       }
     } catch {
-      setItems(DEFAULT_ITEMS)
+      setItems([])
     }
   }, [])
 
@@ -255,82 +174,91 @@ export default function InventoryPage() {
 
         {/* Items List (PDF Page 7) */}
         <div className="space-y-3">
-          {filteredItems.map((item) => {
-            const qty = Number(item.current_qty) || 0
-            const thresh = Number(item.reorder_threshold) || 10
-            const isLow = qty <= thresh
-            const isZero = qty === 0
+          {filteredItems.length > 0 ? (
+            filteredItems.map((item) => {
+              const qty = Number(item.current_qty) || 0
+              const thresh = Number(item.reorder_threshold) || 10
+              const isLow = qty <= thresh
+              const isZero = qty === 0
 
-            const status = isZero ? 'Out of stock' : isLow ? 'Low' : 'Healthy'
-            const statusTone = isZero
-              ? 'bg-[#fbeee8] text-[#b84825]'
-              : isLow
-              ? 'bg-[#faece6] text-[#c05423]'
-              : 'bg-[#e3f3ed] text-[#157a6c]'
-            const barFill = isZero ? 'bg-[#b84825]' : isLow ? 'bg-[#c05423]' : 'bg-[#157a6c]'
-            const barWidth = isZero ? '0%' : `${Math.min(100, Math.max(10, Math.round((qty / (thresh * 3)) * 100)))}%`
+              const status = isZero ? 'Out of stock' : isLow ? 'Low' : 'Healthy'
+              const statusTone = isZero
+                ? 'bg-[#fbeee8] text-[#b84825]'
+                : isLow
+                ? 'bg-[#faece6] text-[#c05423]'
+                : 'bg-[#e3f3ed] text-[#157a6c]'
+              const barFill = isZero ? 'bg-[#b84825]' : isLow ? 'bg-[#c05423]' : 'bg-[#157a6c]'
+              const barWidth = isZero ? '0%' : `${Math.min(100, Math.max(10, Math.round((qty / (thresh * 3)) * 100)))}%`
 
-            return (
-              <article
-                key={item.id}
-                className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h2 className="text-[16px] font-extrabold text-[#11382f]">
-                      {item.name}
-                    </h2>
-                    <div className="mt-0.5 flex items-center gap-2 font-mono text-xs text-[#718d84]">
-                      <span>SKU {item.sku}</span>
-                      <span>· ₹{item.sales_rate || item.purchase_rate || 0}</span>
+              return (
+                <article
+                  key={item.id}
+                  className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h2 className="text-[16px] font-extrabold text-[#11382f]">
+                        {item.name}
+                      </h2>
+                      <div className="mt-0.5 flex items-center gap-2 font-mono text-xs text-[#718d84]">
+                        <span>SKU {item.sku}</span>
+                        <span>· ₹{item.sales_rate || item.purchase_rate || 0}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <strong className="block text-[17px] font-extrabold text-[#11382f]">
+                        {qty} {item.unit || 'pcs'}
+                      </strong>
+                      <span
+                        className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${statusTone}`}
+                      >
+                        {status}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="text-right">
-                    <strong className="block text-[17px] font-extrabold text-[#11382f]">
-                      {qty} {item.unit || 'pcs'}
-                    </strong>
-                    <span
-                      className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${statusTone}`}
-                    >
-                      {status}
-                    </span>
+                  {/* Progress bar matching PDF */}
+                  <div className="mt-4 flex h-2 w-full overflow-hidden rounded-full bg-[#e8ecea]">
+                    <div
+                      className={`h-full rounded-full ${barFill} transition-all`}
+                      style={{ width: barWidth }}
+                    />
                   </div>
-                </div>
 
-                {/* Progress bar matching PDF */}
-                <div className="mt-4 flex h-2 w-full overflow-hidden rounded-full bg-[#e8ecea]">
-                  <div
-                    className={`h-full rounded-full ${barFill} transition-all`}
-                    style={{ width: barWidth }}
-                  />
-                </div>
+                  <div className="mt-3 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setEditingMaterial(item)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#cfded6] bg-[#f8faf9] px-2.5 py-1 text-[11px] font-bold text-[#0e655d] hover:bg-[#ebf3ef]"
+                      title="Admin Edit item master"
+                    >
+                      <Edit3 size={12} />
+                      <span>Edit item</span>
+                    </button>
 
-                <div className="mt-3 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => setEditingMaterial(item)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#cfded6] bg-[#f8faf9] px-2.5 py-1 text-[11px] font-bold text-[#0e655d] hover:bg-[#ebf3ef]"
-                    title="Admin Edit item master"
-                  >
-                    <Edit3 size={12} />
-                    <span>Edit item</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAdjustModal(item)
-                      setNewQty(String(qty))
-                    }}
-                    className="text-[11px] font-bold text-[#0e655d] hover:underline"
-                  >
-                    Adjust stock quantity
-                  </button>
-                </div>
-              </article>
-            )
-          })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdjustModal(item)
+                        setNewQty(String(qty))
+                      }}
+                      className="text-[11px] font-bold text-[#0e655d] hover:underline"
+                    >
+                      Adjust stock quantity
+                    </button>
+                  </div>
+                </article>
+              )
+            })
+          ) : (
+            <div className="rounded-3xl border border-[#e1e9e3] bg-white p-8 text-center">
+              <p className="text-sm font-bold text-[#11382f]">No inventory items found</p>
+              <p className="text-xs text-[#6e8a81] mt-1">
+                Import Stock Items from Tally XML to track materials and quantities.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Admin Edit Modal */}

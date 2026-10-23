@@ -10,37 +10,9 @@ import Nav from '../components/Nav'
 import { accDb } from '../lib/accountingDb'
 import AdminEditModal from '../components/AdminEditModal'
 
-const DEFAULT_EXPENSES = [
-  {
-    id: 1,
-    name: 'Rent',
-    rawAmount: 120000,
-  },
-  {
-    id: 2,
-    name: 'Salaries',
-    rawAmount: 110000,
-  },
-  {
-    id: 3,
-    name: 'Electricity',
-    rawAmount: 28000,
-  },
-  {
-    id: 4,
-    name: 'Transport',
-    rawAmount: 22000,
-  },
-  {
-    id: 5,
-    name: 'Packaging & Supplies',
-    rawAmount: 32000,
-  },
-]
-
 export default function ExpensesPage() {
   const navigate = useNavigate()
-  const [categories, setCategories] = useState(DEFAULT_EXPENSES)
+  const [categories, setCategories] = useState([])
   const [editingExpense, setEditingExpense] = useState(null)
 
   // Load expenses from Dexie ledgers/vouchers
@@ -56,10 +28,10 @@ export default function ExpensesPage() {
           }))
         )
       } else {
-        setCategories(DEFAULT_EXPENSES)
+        setCategories([])
       }
     } catch {
-      setCategories(DEFAULT_EXPENSES)
+      setCategories([])
     }
   }, [])
 
@@ -135,37 +107,46 @@ export default function ExpensesPage() {
           </h2>
 
           <div className="space-y-5">
-            {categories.map((cat) => {
-              const amt = Number(cat.rawAmount) || 0
-              const percentage = Math.min(100, Math.max(8, Math.round((amt / maxExpense) * 100)))
-              const barColor = amt >= 80000 ? 'bg-[#b8521a]' : 'bg-[#cfa472]'
+            {categories.length > 0 ? (
+              categories.map((cat) => {
+                const amt = Number(cat.rawAmount) || 0
+                const percentage = Math.min(100, Math.max(8, Math.round((amt / maxExpense) * 100)))
+                const barColor = amt >= 80000 ? 'bg-[#b8521a]' : 'bg-[#cfa472]'
 
-              return (
-                <div key={cat.id || cat.name} className="group">
-                  <div className="flex items-center justify-between text-sm font-extrabold text-[#11382f] mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <span>{cat.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => setEditingExpense({ id: cat.id, name: cat.name, current_balance: amt, category: 'expense' })}
-                        className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
-                        title="Admin Edit expense"
-                      >
-                        <Edit3 size={11} />
-                        <span>Edit</span>
-                      </button>
+                return (
+                  <div key={cat.id || cat.name} className="group">
+                    <div className="flex items-center justify-between text-sm font-extrabold text-[#11382f] mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span>{cat.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditingExpense({ id: cat.id, name: cat.name, current_balance: amt, category: 'expense' })}
+                          className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
+                          title="Admin Edit expense"
+                        >
+                          <Edit3 size={11} />
+                          <span>Edit</span>
+                        </button>
+                      </div>
+                      <span>{formatAmount(amt)}</span>
                     </div>
-                    <span>{formatAmount(amt)}</span>
+                    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#edebe9]">
+                      <div
+                        className={`h-full rounded-full ${barColor} transition-all duration-300`}
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#edebe9]">
-                    <div
-                      className={`h-full rounded-full ${barColor} transition-all duration-300`}
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })
+            ) : (
+              <div className="py-6 text-center">
+                <p className="text-sm font-bold text-[#11382f]">No expenses recorded</p>
+                <p className="text-xs text-[#6e8a81] mt-1">
+                  Import Tally Payment vouchers or expense ledgers to populate categories.
+                </p>
+              </div>
+            )}
           </div>
         </section>
 

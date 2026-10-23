@@ -697,359 +697,60 @@ export async function deleteDbRecord(table, id) {
 }
 
 /**
- * Initialize Default Accounting Data matching PDF attachments exactly
+ * Purge all sample accounting data (vouchers, inventory, parties, ledgers, imports)
+ */
+export async function purgeSampleData() {
+  await Promise.all([
+    accDb.vouchers.clear(),
+    accDb.materials.clear(),
+    accDb.parties.clear(),
+    accDb.ledgers.clear(),
+    accDb.imports.clear(),
+  ])
+  await accDb.settings.put({ key: 'purged_sample_data', value: 'true' })
+  window.dispatchEvent(new Event('accounting-data-updated'))
+}
+
+/**
+ * Initialize System Settings without any sample records
  */
 export async function initDefaultAccountingData() {
-  const ledgerCount = await accDb.ledgers.count()
-  if (ledgerCount > 0) return
+  const settingsCount = await accDb.settings.count()
+  if (settingsCount === 0) {
+    const defaultSettings = [
+      { key: 'shop_name', value: 'My Shop' },
+      { key: 'invoice_footer', value: 'Thank you for your business' },
+      { key: 'daily_whatsapp_summary', value: 'true' },
+      { key: 'whatsapp_summary_time', value: '8:00 PM' },
+      { key: 'whatsapp_language', value: 'English / বাংলা' },
+      { key: 'auto_import_reminder', value: 'true' },
+      { key: 'last_backup_time', value: 'today, 6:45 PM' },
+      { key: 'owner_pin', value: '1234' },
+      { key: 'admin_pin', value: '8888' },
+      {
+        key: 'owner_permissions',
+        value: JSON.stringify({
+          sales: true,
+          profit: true,
+          expenses: true,
+          debtors: true,
+          creditors: true,
+          inventory: true,
+          loans: true,
+        }),
+      },
+      {
+        key: 'card_order',
+        value: JSON.stringify(['sales', 'profit', 'expenses', 'debtors', 'creditors', 'inventory', 'loans']),
+      },
+      { key: 'purged_sample_data', value: 'true' },
+    ]
+    await accDb.settings.bulkAdd(defaultSettings)
+  }
 
-  // 1. Settings (Owner visibility, WhatsApp, Shop details)
-  const defaultSettings = [
-    { key: 'shop_name', value: '[Shop name]' },
-    { key: 'invoice_footer', value: 'Thank you for your business' },
-    { key: 'daily_whatsapp_summary', value: 'true' },
-    { key: 'whatsapp_summary_time', value: '8:00 PM' },
-    { key: 'whatsapp_language', value: 'English / বাংলা' },
-    { key: 'auto_import_reminder', value: 'true' },
-    { key: 'last_backup_time', value: 'today, 6:45 PM' },
-    { key: 'owner_pin', value: '1234' },
-    { key: 'admin_pin', value: '8888' },
-    {
-      key: 'owner_permissions',
-      value: JSON.stringify({
-        sales: true,
-        profit: true,
-        expenses: true,
-        debtors: true,
-        creditors: true,
-        inventory: true,
-        loans: false, // Hidden from owner by default as shown on PDF pages 14 & 16
-      }),
-    },
-    {
-      key: 'card_order',
-      value: JSON.stringify(['sales', 'profit', 'expenses', 'debtors', 'creditors', 'inventory', 'loans']),
-    },
-  ]
-  await accDb.settings.bulkAdd(defaultSettings)
-
-  // 2. Chart of Accounts (Ledgers)
-  const defaultLedgers = [
-    { name: 'Cash', group: 'Cash-in-hand', current_balance: 145000, category: 'asset' },
-    { name: 'HDFC Current Account', group: 'Bank Accounts', current_balance: 875000, category: 'asset' },
-    { name: 'Term loan', group: 'Loans (Liability)', current_balance: 400000, category: 'liability', note: 'EMI ₹18,500 due 5 Nov' },
-    { name: 'Vendor loan', group: 'Loans (Liability)', current_balance: 50000, category: 'liability', note: 'Repay by 30 Nov' },
-    { name: 'Staff advances', group: 'Loans & Advances (Asset)', current_balance: 15000, category: 'asset', note: '3 people' },
-    { name: 'Supplier advance', group: 'Loans & Advances (Asset)', current_balance: 135000, category: 'asset', note: 'Metro Steel' },
-    // Expenses
-    { name: 'Rent', group: 'Indirect Expenses', current_balance: 120000, category: 'expense' },
-    { name: 'Salaries', group: 'Indirect Expenses', current_balance: 110000, category: 'expense' },
-    { name: 'Electricity', group: 'Indirect Expenses', current_balance: 28000, category: 'expense' },
-    { name: 'Transport', group: 'Indirect Expenses', current_balance: 22000, category: 'expense' },
-  ]
-  await accDb.ledgers.bulkAdd(defaultLedgers)
-
-  // 3. Materials / Inventory (Matching Page 7 & 1 of PDF)
-  // Total stock value ~₹22.6L, 14 low stock items
-  const defaultMaterials = [
-    {
-      sku: 'CC-IP15-CLR',
-      name: 'iPhone 15 · Clear Case',
-      category: 'Cases & Covers',
-      unit: 'pcs',
-      purchase_rate: 180,
-      sales_rate: 350,
-      current_qty: 6,
-      reorder_threshold: 15,
-      status: 'Low',
-    },
-    {
-      sku: 'SL-RN13-BLK',
-      name: 'Redmi Note 13 · Silicone',
-      category: 'Cases & Covers',
-      unit: 'pcs',
-      purchase_rate: 120,
-      sales_rate: 250,
-      current_qty: 112,
-      reorder_threshold: 20,
-      status: 'Healthy',
-    },
-    {
-      sku: 'FC-SA15-BRN',
-      name: 'Samsung A15 · Flip Cover',
-      category: 'Cases & Covers',
-      unit: 'pcs',
-      purchase_rate: 220,
-      sales_rate: 450,
-      current_qty: 0,
-      reorder_threshold: 10,
-      status: 'Out of stock',
-    },
-    {
-      sku: 'TG-IP15-PRM',
-      name: 'iPhone 15 Pro Max 9D Tempered Glass',
-      category: 'Screen Protectors',
-      unit: 'pcs',
-      purchase_rate: 45,
-      sales_rate: 199,
-      current_qty: 8,
-      reorder_threshold: 25,
-      status: 'Low',
-    },
-    {
-      sku: 'CHG-65W-GAN',
-      name: '65W Fast GaN Dual Type-C Charger',
-      category: 'Power & Cables',
-      unit: 'pcs',
-      purchase_rate: 650,
-      sales_rate: 1299,
-      current_qty: 1450,
-      reorder_threshold: 50,
-      status: 'Healthy',
-    },
-    {
-      sku: 'CBL-BRD-TPE',
-      name: 'Braided Type-C Fast Charging Cable 2M',
-      category: 'Power & Cables',
-      unit: 'pcs',
-      purchase_rate: 60,
-      sales_rate: 199,
-      current_qty: 4800,
-      reorder_threshold: 200,
-      status: 'Healthy',
-    },
-    {
-      sku: 'AUD-TWS-AIR',
-      name: 'ANC Pro True Wireless Earbuds',
-      category: 'Audio',
-      unit: 'pcs',
-      purchase_rate: 850,
-      sales_rate: 1699,
-      current_qty: 1200,
-      reorder_threshold: 40,
-      status: 'Healthy',
-    },
-  ]
-  await accDb.materials.bulkAdd(defaultMaterials)
-
-  // 4. Parties: Debtors & Creditors (Matching PDF Page 2, 5, 6)
-  // Debtors Total: ₹8.4L (0-30d ₹4.1L, 31-60d ₹2.6L, 60d+ ₹1.7L)
-  // Creditors Total: ₹5.1L (Due now ₹1.9L, Next 15d ₹1.6L, Later ₹1.6L)
-  const defaultParties = [
-    // Debtors
-    {
-      name: 'Rahul Mobile Hub',
-      type: 'debtor',
-      uid: 'UID-CUST-1001',
-      phone: '+91 98765 43210',
-      last_invoice_date: '12 Oct',
-      current_balance: 184200,
-      age_bucket: '60d+',
-      due_days: 68,
-    },
-    {
-      name: 'City Gadget Point',
-      type: 'debtor',
-      uid: 'UID-CUST-1002',
-      phone: '+91 98112 34567',
-      last_invoice_date: '02 Oct',
-      current_balance: 96500,
-      age_bucket: '31–60d',
-      due_days: 42,
-    },
-    {
-      name: 'Sen Telecom',
-      type: 'debtor',
-      uid: 'UID-CUST-1003',
-      phone: '+91 98301 23456',
-      last_invoice_date: '16 Oct',
-      current_balance: 71900,
-      age_bucket: '0–30d',
-      due_days: 14,
-    },
-    {
-      name: 'Mitra Cover House',
-      type: 'debtor',
-      uid: 'UID-CUST-1004',
-      phone: '+91 98450 98765',
-      last_invoice_date: '17 Oct',
-      current_balance: 48300,
-      age_bucket: '0–30d',
-      due_days: 8,
-    },
-    {
-      name: 'Apex Mobile Zone',
-      type: 'debtor',
-      uid: 'UID-CUST-1005',
-      phone: '+91 98200 11223',
-      last_invoice_date: '10 Oct',
-      current_balance: 163500,
-      age_bucket: '31–60d',
-      due_days: 35,
-    },
-    {
-      name: 'Vikas Digital Store',
-      type: 'debtor',
-      uid: 'UID-CUST-1006',
-      phone: '+91 98990 44556',
-      last_invoice_date: '15 Oct',
-      current_balance: 275600,
-      age_bucket: '0–30d',
-      due_days: 12,
-    },
-    // Creditors
-    {
-      name: 'Metro Steel and Hardware',
-      type: 'creditor',
-      uid: null,
-      phone: '+91 98210 99887',
-      next_payment: '20 Oct',
-      due_status: 'Due in 1d',
-      due_days: 1,
-      current_balance: 192000,
-      due_bucket: 'Due now',
-    },
-    {
-      name: 'Supreme Fabrics Mill',
-      type: 'creditor',
-      uid: null,
-      phone: '+91 98765 43210',
-      next_payment: '02 Nov',
-      due_status: 'Due in 14d',
-      due_days: 14,
-      current_balance: 130500,
-      due_bucket: 'Next 15d',
-    },
-    {
-      name: 'Bright Cases Wholesale',
-      type: 'creditor',
-      uid: null,
-      phone: '+91 98311 88776',
-      next_payment: '12 Nov',
-      due_status: 'Due in 24d',
-      due_days: 24,
-      current_balance: 86200,
-      due_bucket: 'Later',
-    },
-    {
-      name: 'Universal Displays Ltd',
-      type: 'creditor',
-      uid: null,
-      phone: '+91 98400 33221',
-      next_payment: '25 Nov',
-      due_status: 'Due in 37d',
-      due_days: 37,
-      current_balance: 101300,
-      due_bucket: 'Later',
-    },
-  ]
-  await accDb.parties.bulkAdd(defaultParties)
-
-  // 5. Vouchers (Matching Page 3 & 1 of PDF)
-  // Sales today: ₹1.42L, Last 7 days: ₹9.8L
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const yesterdayStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-
-  const defaultVouchers = [
-    {
-      voucher_no: 'INV-0412',
-      voucher_type: 'sales',
-      date: todayStr,
-      party_name: 'Rahul Mobile Hub',
-      party_uid: 'UID-CUST-1001',
-      amount: 48200,
-      paid_amount: 0,
-      due_amount: 48200,
-      status: 'Due',
-      payment_mode: 'Credit',
-      narration: 'Bulk supply: 120x Clear Cases & 80x Tempered Glass',
-      items: [
-        { sku: 'CC-IP15-CLR', name: 'iPhone 15 · Clear Case', qty: 120, rate: 350, cost_rate: 180, amount: 42000 },
-        { sku: 'TG-IP15-PRM', name: 'iPhone 15 Pro Max 9D Tempered Glass', qty: 80, rate: 199, cost_rate: 45, amount: 6200 },
-      ],
-      createdAt: new Date().toISOString(),
-    },
-    {
-      voucher_no: 'INV-0411',
-      voucher_type: 'sales',
-      date: todayStr,
-      party_name: 'Walk-in customer',
-      party_uid: null,
-      amount: 2350,
-      paid_amount: 2350,
-      due_amount: 0,
-      status: 'Paid',
-      payment_mode: 'Cash',
-      narration: 'Counter retail sale',
-      items: [
-        { sku: 'SL-RN13-BLK', name: 'Redmi Note 13 · Silicone', qty: 5, rate: 250, cost_rate: 120, amount: 1250 },
-        { sku: 'CBL-BRD-TPE', name: 'Braided Type-C Fast Charging Cable 2M', qty: 5, rate: 199, cost_rate: 60, amount: 995 },
-      ],
-      createdAt: new Date(Date.now() - 3600000).toISOString(),
-    },
-    {
-      voucher_no: 'INV-0410',
-      voucher_type: 'sales',
-      date: yesterdayStr,
-      party_name: 'Sen Telecom',
-      party_uid: 'UID-CUST-1003',
-      amount: 71900,
-      paid_amount: 71900,
-      due_amount: 0,
-      status: 'Paid',
-      payment_mode: 'HDFC Bank',
-      narration: 'NEFT full payment for GaN chargers & audio accessories',
-      items: [
-        { sku: 'CHG-65W-GAN', name: '65W Fast GaN Dual Type-C Charger', qty: 50, rate: 1299, cost_rate: 650, amount: 64950 },
-      ],
-      createdAt: new Date(Date.now() - 86400000).toISOString(),
-    },
-    {
-      voucher_no: 'INV-0409',
-      voucher_type: 'sales',
-      date: todayStr,
-      party_name: 'Mitra Cover House',
-      party_uid: 'UID-CUST-1004',
-      amount: 91450,
-      paid_amount: 91450,
-      due_amount: 0,
-      status: 'Paid',
-      payment_mode: 'UPI',
-      narration: 'Stock replenishment for premium cases',
-      items: [
-        { sku: 'AUD-TWS-AIR', name: 'ANC Pro True Wireless Earbuds', qty: 50, rate: 1699, cost_rate: 850, amount: 84950 },
-      ],
-      createdAt: new Date().toISOString(),
-    },
-  ]
-  await accDb.vouchers.bulkAdd(defaultVouchers)
-
-  // 6. Recent Imports Log (Matching Page 11 of PDF)
-  const defaultImports = [
-    {
-      filename: 'DayBook_17Oct.xml',
-      date: '17 Oct, 5:12 PM',
-      added_count: 21,
-      skipped_count: 2,
-      status: '21 added',
-      problems_count: 0,
-    },
-    {
-      filename: 'DayBook_16Oct.xml',
-      date: '16 Oct, 6:02 PM',
-      added_count: 34,
-      skipped_count: 5,
-      status: '34 added',
-      problems_count: 0,
-    },
-    {
-      filename: 'Ledgers.xlsx',
-      date: '15 Oct, 7:30 PM',
-      added_count: 12,
-      skipped_count: 0,
-      status: '2 problems',
-      problems_count: 2,
-    },
-  ]
-  await accDb.imports.bulkAdd(defaultImports)
+  // Purge any previously seeded sample data
+  const purged = await accDb.settings.get('purged_sample_data')
+  if (!purged || purged.value !== 'true') {
+    await purgeSampleData()
+  }
 }

@@ -14,74 +14,11 @@ import { accDb } from '../lib/accountingDb'
 import Nav from '../components/Nav'
 import AdminEditModal from '../components/AdminEditModal'
 
-const DEFAULT_DEBTORS = [
-  {
-    id: 1,
-    name: 'Rahul Mobile Hub',
-    uid: 'UID-CUST-1001',
-    last_invoice: '12 Oct',
-    current_balance: 184200,
-    due_days: 68,
-    phone: '+919876543210',
-    age_bucket: '60d+',
-  },
-  {
-    id: 2,
-    name: 'City Gadget Point',
-    uid: 'UID-CUST-1002',
-    last_invoice: '02 Oct',
-    current_balance: 96500,
-    due_days: 42,
-    phone: '+919811234567',
-    age_bucket: '31–60d',
-  },
-  {
-    id: 3,
-    name: 'Sen Telecom',
-    uid: 'UID-CUST-1003',
-    last_invoice: '16 Oct',
-    current_balance: 71900,
-    due_days: 14,
-    phone: '+919830123456',
-    age_bucket: '0–30d',
-  },
-  {
-    id: 4,
-    name: 'Mitra Cover House',
-    uid: 'UID-CUST-1004',
-    last_invoice: '17 Oct',
-    current_balance: 48300,
-    due_days: 8,
-    phone: '+919845098765',
-    age_bucket: '0–30d',
-  },
-  {
-    id: 5,
-    name: 'Apex Mobile Zone',
-    uid: 'UID-CUST-1005',
-    last_invoice: '10 Oct',
-    current_balance: 163500,
-    due_days: 35,
-    phone: '+919820011223',
-    age_bucket: '31–60d',
-  },
-  {
-    id: 6,
-    name: 'Vikas Digital Store',
-    uid: 'UID-CUST-1006',
-    last_invoice: '15 Oct',
-    current_balance: 275600,
-    due_days: 12,
-    phone: '+919899044556',
-    age_bucket: '0–30d',
-  },
-]
-
 export default function DebtorsPage() {
   const { shopName } = useAuth()
   const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
-  const [customers, setCustomers] = useState(DEFAULT_DEBTORS)
+  const [customers, setCustomers] = useState([])
   const [whatsappSent, setWhatsappSent] = useState(null)
   const [callModal, setCallModal] = useState(null)
   const [editingDebtor, setEditingDebtor] = useState(null)
@@ -93,10 +30,10 @@ export default function DebtorsPage() {
       if (dbDebtors && dbDebtors.length > 0) {
         setCustomers(dbDebtors)
       } else {
-        setCustomers(DEFAULT_DEBTORS)
+        setCustomers([])
       }
     } catch {
-      setCustomers(DEFAULT_DEBTORS)
+      setCustomers([])
     }
   }, [])
 
@@ -256,90 +193,99 @@ export default function DebtorsPage() {
 
         {/* Customer Cards List matching PDF Page 2 */}
         <div className="space-y-3">
-          {filteredCustomers.map((cust) => {
-            const bal = Number(cust.current_balance) || 0
-            const days = Number(cust.due_days) || 10
-            const isCritical = days > 60
+          {filteredCustomers.length > 0 ? (
+            filteredCustomers.map((cust) => {
+              const bal = Number(cust.current_balance) || 0
+              const days = Number(cust.due_days) || 10
+              const isCritical = days > 60
 
-            return (
-              <article
-                key={cust.id}
-                className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-[17px] font-extrabold text-[#11382f]">
-                        {cust.name}
-                      </h2>
-                      {cust.uid && (
-                        <span className="font-mono text-[10px] text-[#0d786d] font-extrabold bg-[#e4f3eb] px-1.5 py-0.5 rounded">
-                          {cust.uid}
-                        </span>
-                      )}
-                    </div>
-                    <span className="mt-0.5 block text-xs text-[#718d84]">
-                      Last invoice {cust.last_invoice || 'Recent'}
-                    </span>
-                  </div>
-
-                  <div className="text-right">
-                    <strong className="block text-[18px] font-extrabold text-[#11382f]">
-                      ₹{bal.toLocaleString('en-IN')}
-                    </strong>
-                    <span
-                      className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${
-                        isCritical
-                          ? 'bg-[#feeae6] text-[#b73725]'
-                          : days > 30
-                          ? 'bg-[#e2f3ec] text-[#0d786d]'
-                          : 'bg-[#e4f1eb] text-[#146b60]'
-                      }`}
-                    >
-                      {cust.age_bucket || (days > 60 ? '60d+' : days > 30 ? '31–60d' : '0–30d')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Call, WhatsApp & Collect Dues Actions */}
-                <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-                  {cust.phone && (
-                    <button
-                      type="button"
-                      onClick={() => handleCall(cust)}
-                      className="flex items-center gap-1.5 rounded-xl border border-[#cbe1d7] bg-white px-3 py-1.5 text-xs font-bold text-[#145347] hover:bg-[#eef7f3] transition"
-                    >
-                      <Phone size={13} />
-                      <span>Call</span>
-                    </button>
-                  )}
-
-                  {cust.phone && (
-                    <button
-                      type="button"
-                      onClick={() => handleWhatsApp(cust)}
-                      className="flex items-center gap-1.5 rounded-xl bg-[#0e655d] px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-[#0a4f49] transition active:scale-95"
-                    >
-                      <MessageCircle size={13} />
-                      <span>
-                        {whatsappSent === cust.id ? 'Reminder sent ✓' : 'WhatsApp reminder'}
+              return (
+                <article
+                  key={cust.id}
+                  className="rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs transition hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-[17px] font-extrabold text-[#11382f]">
+                          {cust.name}
+                        </h2>
+                        {cust.uid && (
+                          <span className="font-mono text-[10px] text-[#0d786d] font-extrabold bg-[#e4f3eb] px-1.5 py-0.5 rounded">
+                            {cust.uid}
+                          </span>
+                        )}
+                      </div>
+                      <span className="mt-0.5 block text-xs text-[#718d84]">
+                        Last invoice {cust.last_invoice || 'Recent'}
                       </span>
-                    </button>
-                  )}
+                    </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setEditingDebtor(cust)}
-                    className="flex items-center gap-1.5 rounded-xl border border-[#0e655d]/30 bg-[#f0f9f5] px-3.5 py-1.5 text-xs font-bold text-[#0e655d] hover:bg-[#e2f3ec] transition active:scale-95"
-                    title="Admin edit debtor details"
-                  >
-                    <Edit3 size={13} />
-                    <span>Edit</span>
-                  </button>
-                </div>
-              </article>
-            )
-          })}
+                    <div className="text-right">
+                      <strong className="block text-[18px] font-extrabold text-[#11382f]">
+                        ₹{bal.toLocaleString('en-IN')}
+                      </strong>
+                      <span
+                        className={`mt-1 inline-block rounded-md px-2.5 py-0.5 text-[11px] font-bold ${
+                          isCritical
+                            ? 'bg-[#feeae6] text-[#b73725]'
+                            : days > 30
+                            ? 'bg-[#e2f3ec] text-[#0d786d]'
+                            : 'bg-[#e4f1eb] text-[#146b60]'
+                        }`}
+                      >
+                        {cust.age_bucket || (days > 60 ? '60d+' : days > 30 ? '31–60d' : '0–30d')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Call, WhatsApp & Collect Dues Actions */}
+                  <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                    {cust.phone && (
+                      <button
+                        type="button"
+                        onClick={() => handleCall(cust)}
+                        className="flex items-center gap-1.5 rounded-xl border border-[#cbe1d7] bg-white px-3 py-1.5 text-xs font-bold text-[#145347] hover:bg-[#eef7f3] transition"
+                      >
+                        <Phone size={13} />
+                        <span>Call</span>
+                      </button>
+                    )}
+
+                    {cust.phone && (
+                      <button
+                        type="button"
+                        onClick={() => handleWhatsApp(cust)}
+                        className="flex items-center gap-1.5 rounded-xl bg-[#0e655d] px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-[#0a4f49] transition active:scale-95"
+                      >
+                        <MessageCircle size={13} />
+                        <span>
+                          {whatsappSent === cust.id ? 'Reminder sent ✓' : 'WhatsApp reminder'}
+                        </span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setEditingDebtor(cust)}
+                      className="flex items-center gap-1.5 rounded-xl border border-[#0e655d]/30 bg-[#f0f9f5] px-3.5 py-1.5 text-xs font-bold text-[#0e655d] hover:bg-[#e2f3ec] transition active:scale-95"
+                      title="Admin edit debtor details"
+                    >
+                      <Edit3 size={13} />
+                      <span>Edit</span>
+                    </button>
+                  </div>
+                </article>
+              )
+            })
+          ) : (
+            <div className="rounded-3xl border border-[#e1e9e3] bg-white p-8 text-center">
+              <p className="text-sm font-bold text-[#11382f]">No debtor accounts found</p>
+              <p className="text-xs text-[#6e8a81] mt-1">
+                Import customer ledgers or day book from Tally to populate debtors.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Admin Edit Modal for Debtors */}

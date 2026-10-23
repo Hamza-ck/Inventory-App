@@ -22,103 +22,12 @@ import InvoicePrintModal from '../components/InvoicePrintModal'
 import AdminEditModal from '../components/AdminEditModal'
 import { accDb } from '../lib/accountingDb'
 
-// Baseline PDF invoices (Page 3) as fallback seed
-const DEFAULT_PDF_INVOICES = [
-  {
-    id: 1,
-    voucher_no: 'INV-0412',
-    party_name: 'Rahul Mobile Hub',
-    party_phone: '+919876543210',
-    party_uid: 'UID-CUST-1001',
-    date: '2026-10-17',
-    displayDate: '17 Oct',
-    amount: 48200,
-    paid_amount: 0,
-    due_amount: 48200,
-    payment_mode: 'Credit',
-    status: 'Due',
-    statusTone: 'bg-[#fef3eb] text-[#c25e19]',
-    items: [
-      { sku: 'CC-IP15-CLR', name: 'iPhone 15 · Clear Case', qty: 120, rate: 350, amount: 42000 },
-      { sku: 'TG-IP15-PRM', name: 'iPhone 15 Pro Max 9D Glass', qty: 80, rate: 199, amount: 6200 },
-    ],
-  },
-  {
-    id: 2,
-    voucher_no: 'INV-0411',
-    party_name: 'Walk-in customer',
-    party_phone: '',
-    party_uid: null,
-    date: '2026-10-17',
-    displayDate: '17 Oct',
-    amount: 2350,
-    paid_amount: 2350,
-    due_amount: 0,
-    payment_mode: 'Cash',
-    status: 'Paid',
-    statusTone: 'bg-[#e2f3ec] text-[#0d786d]',
-    items: [
-      { sku: 'SL-RN13-BLK', name: 'Redmi Note 13 · Silicone', qty: 5, rate: 250, amount: 1250 },
-      { sku: 'CBL-BRD-TPE', name: 'Braided Type-C Fast Cable', qty: 5, rate: 199, amount: 995 },
-    ],
-  },
-  {
-    id: 3,
-    voucher_no: 'INV-0410',
-    party_name: 'Sen Telecom',
-    party_phone: '+919830123456',
-    party_uid: 'UID-CUST-1003',
-    date: '2026-10-16',
-    displayDate: '16 Oct',
-    amount: 71900,
-    paid_amount: 71900,
-    due_amount: 0,
-    payment_mode: 'UPI',
-    status: 'Paid',
-    statusTone: 'bg-[#e2f3ec] text-[#0d786d]',
-    items: [
-      { sku: 'CHG-65W-GAN', name: '65W Fast GaN Dual Charger', qty: 50, rate: 1299, amount: 64950 },
-      { sku: 'TG-IP15-PRM', name: 'iPhone 15 Pro Max 9D Glass', qty: 35, rate: 199, amount: 6950 },
-    ],
-  },
-  {
-    id: 4,
-    voucher_no: 'INV-0409',
-    party_name: 'Mitra Cover House',
-    party_phone: '+919845098765',
-    party_uid: 'UID-CUST-1004',
-    date: '2026-10-15',
-    displayDate: '15 Oct',
-    amount: 91450,
-    paid_amount: 91450,
-    due_amount: 0,
-    payment_mode: 'HDFC Bank',
-    status: 'Paid',
-    statusTone: 'bg-[#e2f3ec] text-[#0d786d]',
-    items: [
-      { sku: 'AUD-TWS-AIR', name: 'ANC Pro True Wireless Earbuds', qty: 50, rate: 1699, amount: 84950 },
-      { sku: 'CC-IP15-CLR', name: 'iPhone 15 · Clear Case', qty: 18, rate: 350, amount: 6500 },
-    ],
-  },
-]
-
 export default function SalesPage() {
   const navigate = useNavigate()
   const [selectedInvoice, setSelectedInvoice] = useState(null)
   const [editingInvoice, setEditingInvoice] = useState(null)
   const [search, setSearch] = useState('')
-  const [invoices, setInvoices] = useState(DEFAULT_PDF_INVOICES)
-
-  // 7-day Sales Bar Chart data (PDF Page 3)
-  const sales7Days = [
-    { day: 'Mon', amount: 110000, display: '₹1.1L' },
-    { day: 'Tue', amount: 140000, display: '₹1.4L' },
-    { day: 'Wed', amount: 90000, display: '₹0.9L' },
-    { day: 'Thu', amount: 160000, display: '₹1.6L' },
-    { day: 'Fri', amount: 130000, display: '₹1.3L' },
-    { day: 'Sat', amount: 210000, display: '₹2.1L', isPeak: true },
-    { day: 'Sun', amount: 140000, display: '₹1.4L' },
-  ]
+  const [invoices, setInvoices] = useState([])
 
   // Format date helper for invoice cards
   const formatInvoiceDate = (dateStr) => {
@@ -132,6 +41,37 @@ export default function SalesPage() {
     }
   }
 
+  // 7-day Sales Bar Chart data computed from live invoices
+  const sales7Days = useMemo(() => {
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const now = new Date()
+    const list = []
+    let max = 0
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 86400000)
+      const dStr = d.toISOString().slice(0, 10)
+      const dayTotal = invoices
+        .filter((inv) => (inv.date || '').slice(0, 10) === dStr)
+        .reduce((sum, inv) => sum + (Number(inv.amount) || 0), 0)
+
+      if (dayTotal > max) max = dayTotal
+      list.push({
+        day: dayNames[d.getDay()],
+        amount: dayTotal,
+        display: dayTotal >= 100000 ? `₹${(dayTotal / 100000).toFixed(1)}L` : dayTotal >= 1000 ? `₹${(dayTotal / 1000).toFixed(0)}K` : `₹${dayTotal}`,
+        isPeak: false,
+      })
+    }
+
+    if (max > 0) {
+      list.forEach((item) => {
+        if (item.amount === max) item.isPeak = true
+      })
+    }
+    return list
+  }, [invoices])
+
   // Load live invoices from Dexie DB
   const loadInvoices = useCallback(async () => {
     try {
@@ -142,7 +82,6 @@ export default function SalesPage() {
         .sortBy('id')
 
       if (dbVouchers && dbVouchers.length > 0) {
-        // Map db records with proper status colors and display dates
         const mapped = dbVouchers.map((v) => {
           const isDue = Number(v.due_amount) > 0 || v.status === 'Due'
           return {
@@ -154,17 +93,13 @@ export default function SalesPage() {
               : 'bg-[#e2f3ec] text-[#0d786d]',
           }
         })
-
-        // Merge with DEFAULT_PDF_INVOICES so baseline examples remain if not in db
-        const existingNos = new Set(mapped.map((m) => m.voucher_no))
-        const remainingDefaults = DEFAULT_PDF_INVOICES.filter((d) => !existingNos.has(d.voucher_no))
-        setInvoices([...mapped, ...remainingDefaults])
+        setInvoices(mapped)
       } else {
-        setInvoices(DEFAULT_PDF_INVOICES)
+        setInvoices([])
       }
     } catch (err) {
       console.warn('Error fetching invoices from Dexie:', err)
-      setInvoices(DEFAULT_PDF_INVOICES)
+      setInvoices([])
     }
   }, [])
 

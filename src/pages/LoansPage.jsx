@@ -9,40 +9,10 @@ import Nav from '../components/Nav'
 import { accDb } from '../lib/accountingDb'
 import AdminEditModal from '../components/AdminEditModal'
 
-const DEFAULT_LOANS_OWED = [
-  {
-    id: 1,
-    name: 'Term loan',
-    amount: 400000,
-    note: 'EMI ₹18,500 due 5 Nov',
-  },
-  {
-    id: 2,
-    name: 'Vendor loan',
-    amount: 50000,
-    note: 'Repay by 30 Nov',
-  },
-]
-
-const DEFAULT_ADVANCES_GIVEN = [
-  {
-    id: 3,
-    name: 'Staff advances',
-    amount: 15000,
-    note: '3 people',
-  },
-  {
-    id: 4,
-    name: 'Supplier advance',
-    amount: 135000,
-    note: 'Metro Steel',
-  },
-]
-
 export default function LoansPage() {
   const navigate = useNavigate()
-  const [loansOwed, setLoansOwed] = useState(DEFAULT_LOANS_OWED)
-  const [advancesGiven, setAdvancesGiven] = useState(DEFAULT_ADVANCES_GIVEN)
+  const [loansOwed, setLoansOwed] = useState([])
+  const [advancesGiven, setAdvancesGiven] = useState([])
   const [editingLoan, setEditingLoan] = useState(null)
 
   // Load from Dexie ledgers
@@ -62,7 +32,7 @@ export default function LoansPage() {
           }))
         )
       } else {
-        setLoansOwed(DEFAULT_LOANS_OWED)
+        setLoansOwed([])
       }
 
       if (given.length > 0) {
@@ -75,11 +45,11 @@ export default function LoansPage() {
           }))
         )
       } else {
-        setAdvancesGiven(DEFAULT_ADVANCES_GIVEN)
+        setAdvancesGiven([])
       }
     } catch {
-      setLoansOwed(DEFAULT_LOANS_OWED)
-      setAdvancesGiven(DEFAULT_ADVANCES_GIVEN)
+      setLoansOwed([])
+      setAdvancesGiven([])
     }
   }, [])
 
@@ -164,36 +134,42 @@ export default function LoansPage() {
             </strong>
           </div>
 
-          <div className="divide-y divide-[#edf3f0]">
-            {loansOwed.map((l) => (
-              <div key={l.id || l.name} className="py-4 flex items-start justify-between group">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <strong className="block text-sm font-extrabold text-[#11382f]">
-                      {l.name}
-                    </strong>
-                    <button
-                      type="button"
-                      onClick={() => setEditingLoan({ id: l.id, name: l.name, current_balance: l.amount, group: 'Loans (Liability)', note: l.note })}
-                      className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
-                      title="Admin Edit loan record"
-                    >
-                      <Edit3 size={11} />
-                      <span>Edit</span>
-                    </button>
+          {loansOwed.length === 0 ? (
+            <div className="py-6 text-center text-xs text-[#718d84]">
+              No loans owed recorded. Import from Tally to sync loan liability ledgers.
+            </div>
+          ) : (
+            <div className="divide-y divide-[#edf3f0]">
+              {loansOwed.map((l) => (
+                <div key={l.id || l.name} className="py-4 flex items-start justify-between group">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <strong className="block text-sm font-extrabold text-[#11382f]">
+                        {l.name}
+                      </strong>
+                      <button
+                        type="button"
+                        onClick={() => setEditingLoan({ id: l.id, name: l.name, current_balance: l.amount, group: 'Loans (Liability)', note: l.note })}
+                        className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
+                        title="Admin Edit loan record"
+                      >
+                        <Edit3 size={11} />
+                        <span>Edit</span>
+                      </button>
+                    </div>
+                    {l.note && (
+                      <span className="mt-1 block text-xs text-[#718d84]">
+                        {l.note}
+                      </span>
+                    )}
                   </div>
-                  {l.note && (
-                    <span className="mt-1 block text-xs text-[#718d84]">
-                      {l.note}
-                    </span>
-                  )}
+                  <strong className="text-base font-extrabold text-[#11382f]">
+                    {formatAmount(l.amount)}
+                  </strong>
                 </div>
-                <strong className="text-base font-extrabold text-[#11382f]">
-                  {formatAmount(l.amount)}
-                </strong>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Section 2: Advances given (PDF Page 9) */}
@@ -207,36 +183,42 @@ export default function LoansPage() {
             </strong>
           </div>
 
-          <div className="divide-y divide-[#edf3f0]">
-            {advancesGiven.map((a) => (
-              <div key={a.id || a.name} className="py-4 flex items-start justify-between group">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <strong className="block text-sm font-extrabold text-[#11382f]">
-                      {a.name}
-                    </strong>
-                    <button
-                      type="button"
-                      onClick={() => setEditingLoan({ id: a.id, name: a.name, current_balance: a.amount, group: 'Loans & Advances (Asset)', note: a.note })}
-                      className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
-                      title="Admin Edit advance record"
-                    >
-                      <Edit3 size={11} />
-                      <span>Edit</span>
-                    </button>
+          {advancesGiven.length === 0 ? (
+            <div className="py-6 text-center text-xs text-[#718d84]">
+              No advances given recorded. Import from Tally to sync advance ledgers.
+            </div>
+          ) : (
+            <div className="divide-y divide-[#edf3f0]">
+              {advancesGiven.map((a) => (
+                <div key={a.id || a.name} className="py-4 flex items-start justify-between group">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <strong className="block text-sm font-extrabold text-[#11382f]">
+                        {a.name}
+                      </strong>
+                      <button
+                        type="button"
+                        onClick={() => setEditingLoan({ id: a.id, name: a.name, current_balance: a.amount, group: 'Loans & Advances (Asset)', note: a.note })}
+                        className="opacity-75 group-hover:opacity-100 inline-flex items-center gap-1 rounded-md border border-[#cfded6] bg-[#f8faf9] px-2 py-0.5 text-[10px] font-bold text-[#0e655d] hover:bg-[#ebf3ef] transition"
+                        title="Admin Edit advance record"
+                      >
+                        <Edit3 size={11} />
+                        <span>Edit</span>
+                      </button>
+                    </div>
+                    {a.note && (
+                      <span className="mt-1 block text-xs text-[#718d84]">
+                        {a.note}
+                      </span>
+                    )}
                   </div>
-                  {a.note && (
-                    <span className="mt-1 block text-xs text-[#718d84]">
-                      {a.note}
-                    </span>
-                  )}
+                  <strong className="text-base font-extrabold text-[#11382f]">
+                    {formatAmount(a.amount)}
+                  </strong>
                 </div>
-                <strong className="text-base font-extrabold text-[#11382f]">
-                  {formatAmount(a.amount)}
-                </strong>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Admin Edit Modal */}

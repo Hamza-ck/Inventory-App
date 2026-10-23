@@ -30,48 +30,51 @@ export default function TallyIntegrationPage() {
   const fileInputRef = useRef(null)
 
   const [activeTab, setActiveTab] = useState('Transactions') // 'Masters' | 'Transactions'
-  const [selectedFile, setSelectedFile] = useState({
-    name: 'DayBook_18Oct.xml',
-    status: 'Ready to import',
-    voucherCount: '412 vouchers',
-    newCount: 412,
-    skippedCount: 38,
-    updatedCount: 3,
-    problemsCount: 0,
-  })
+  const [selectedFile, setSelectedFile] = useState(null)
   const [parsedDataset, setParsedDataset] = useState(null)
   const [showProblemsView, setShowProblemsView] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importSuccess, setImportSuccess] = useState(null)
   const [recentImports, setRecentImports] = useState([])
 
-  // Problem items matching PDF Page 12
-  const [problems, setProblems] = useState([
-    {
-      id: 1,
-      where: 'Voucher 128 · 14 Oct',
-      problem: 'Customer “Rahul Hub” is not in the masters',
-      howToFix: 'Import masters first',
-      actionLabel: 'Import masters',
-      resolved: false,
-    },
-    {
-      id: 2,
-      where: 'Item “Case A12”',
-      problem: 'Stock item has no unit or price',
-      howToFix: 'Add it in Tally, then re-export',
-      actionLabel: 'Skip item',
-      resolved: false,
-    },
-    {
-      id: 3,
-      where: 'Voucher 131 · 15 Oct',
-      problem: 'Date could not be read',
-      howToFix: 'Re-export the Day Book as XML',
-      actionLabel: 'Skip voucher',
-      resolved: false,
-    },
-  ])
+  // Problem items matching PDF Page 12 (empty by default; populated on simulated test or real parse issues)
+  const [problems, setProblems] = useState([])
+
+  const handleToggleProblemsView = () => {
+    if (!showProblemsView) {
+      if (problems.length === 0) {
+        setProblems([
+          {
+            id: 1,
+            where: 'Voucher 128 · 14 Oct',
+            problem: 'Customer “Rahul Hub” is not in the masters',
+            howToFix: 'Import masters first',
+            actionLabel: 'Import masters',
+            resolved: false,
+          },
+          {
+            id: 2,
+            where: 'Item “Case A12”',
+            problem: 'Stock item has no unit or price',
+            howToFix: 'Add it in Tally, then re-export',
+            actionLabel: 'Skip item',
+            resolved: false,
+          },
+          {
+            id: 3,
+            where: 'Voucher 131 · 15 Oct',
+            problem: 'Date could not be read',
+            howToFix: 'Re-export the Day Book as XML',
+            actionLabel: 'Skip voucher',
+            resolved: false,
+          },
+        ])
+      }
+      setShowProblemsView(true)
+    } else {
+      setShowProblemsView(false)
+    }
+  }
 
   // Load recent imports log from Dexie
   const loadRecentImports = useCallback(async () => {
@@ -91,32 +94,10 @@ export default function TallyIntegrationPage() {
           }))
         )
       } else {
-        setRecentImports([
-          {
-            id: 1,
-            date: '17 Oct, 5:12 PM',
-            filename: 'DayBook_17Oct.xml',
-            badge: '21 added',
-            badgeTone: 'bg-[#e2f3ec] text-[#0d786d]',
-          },
-          {
-            id: 2,
-            date: '16 Oct, 6:02 PM',
-            filename: 'DayBook_16Oct.xml',
-            badge: '34 added',
-            badgeTone: 'bg-[#e2f3ec] text-[#0d786d]',
-          },
-          {
-            id: 3,
-            date: '15 Oct, 7:30 PM',
-            filename: 'Ledgers.xlsx',
-            badge: '2 problems',
-            badgeTone: 'bg-[#fef1ec] text-[#c25e19]',
-          },
-        ])
+        setRecentImports([])
       }
     } catch {
-      // fallback
+      setRecentImports([])
     }
   }, [])
 
@@ -192,10 +173,11 @@ export default function TallyIntegrationPage() {
 
   // Import into DB
   const handleImportNow = async () => {
+    if (!selectedFile) return
     setImporting(true)
 
     try {
-      let finalResult = { newCount: selectedFile.newCount, skippedCount: 0, updatedCount: 0 }
+      let finalResult = { newCount: selectedFile.newCount || 0, skippedCount: 0, updatedCount: 0 }
 
       if (parsedDataset) {
         finalResult = await importTallyDataToDb(parsedDataset)
@@ -295,7 +277,7 @@ export default function TallyIntegrationPage() {
             {/* Toggle to inspect error resolution view (PDF Page 12) */}
             <button
               type="button"
-              onClick={() => setShowProblemsView(!showProblemsView)}
+              onClick={handleToggleProblemsView}
               className={`rounded-xl px-3 py-1.5 text-xs font-bold transition border ${
                 showProblemsView
                   ? 'bg-[#c25e19] text-white border-[#c25e19]'
@@ -469,21 +451,36 @@ export default function TallyIntegrationPage() {
                   </div>
                 </div>
 
-                {/* Selected File Card (PDF Page 4 & 11) */}
-                <div className="flex items-center justify-between rounded-3xl border border-[#e1e9e3] bg-white p-5 shadow-xs">
-                  <div>
-                    <strong className="block text-sm font-extrabold text-[#11382f]">
-                      {selectedFile.name}
-                    </strong>
-                    <span className="mt-0.5 block text-xs text-[#708d83]">
-                      {selectedFile.status}
-                    </span>
-                  </div>
+                {/* Selected File Card (when a file is chosen or loaded) */}
+                {selectedFile && (
+                  <div className="flex items-center justify-between rounded-3xl border border-[#0e655d]/20 bg-[#f7faf8] p-5 shadow-xs">
+                    <div>
+                      <strong className="block text-sm font-extrabold text-[#11382f]">
+                        {selectedFile.name}
+                      </strong>
+                      <span className="mt-0.5 block text-xs text-[#708d83]">
+                        {selectedFile.status}
+                      </span>
+                    </div>
 
-                  <span className="rounded-xl bg-[#e3f3ec] px-3.5 py-1.5 text-xs font-extrabold text-[#0d786d]">
-                    {selectedFile.voucherCount}
-                  </span>
-                </div>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-xl bg-[#e3f3ec] px-3.5 py-1.5 text-xs font-extrabold text-[#0d786d]">
+                        {selectedFile.voucherCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedFile(null)
+                          setParsedDataset(null)
+                        }}
+                        className="rounded-lg p-1.5 text-[#708d83] hover:bg-[#ebf3ef] hover:text-[#c25e19] transition"
+                        title="Remove file"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Right Column: Preview & Action (5 cols on Desktop) */}
@@ -493,55 +490,71 @@ export default function TallyIntegrationPage() {
                     Preview
                   </h2>
 
-                  <div className="divide-y divide-[#edf3f0] text-xs">
-                    <div className="py-3 flex items-center justify-between">
-                      <span className="font-semibold text-[#66837b]">New entries</span>
-                      <strong className="font-extrabold text-[#11382f]">
-                        {selectedFile.newCount}
-                      </strong>
-                    </div>
-                    <div className="py-3 flex items-center justify-between">
-                      <span className="font-semibold text-[#66837b]">
-                        Already imported (skipped)
-                      </span>
-                      <strong className="font-extrabold text-[#66837b]">
-                        {selectedFile.skippedCount}
-                      </strong>
-                    </div>
-                    <div className="py-3 flex items-center justify-between">
-                      <span className="font-semibold text-[#66837b]">Updated</span>
-                      <strong className="font-extrabold text-[#11382f]">
-                        {selectedFile.updatedCount}
-                      </strong>
-                    </div>
-                    <div className="py-3 flex items-center justify-between">
-                      <span className="font-semibold text-[#66837b]">Problems</span>
-                      <strong
-                        className={`font-extrabold ${
-                          selectedFile.problemsCount > 0 ? 'text-[#c25e19]' : 'text-[#11382f]'
-                        }`}
-                      >
-                        {selectedFile.problemsCount}
-                      </strong>
-                    </div>
-                  </div>
+                  {selectedFile ? (
+                    <>
+                      <div className="divide-y divide-[#edf3f0] text-xs">
+                        <div className="py-3 flex items-center justify-between">
+                          <span className="font-semibold text-[#66837b]">New entries</span>
+                          <strong className="font-extrabold text-[#11382f]">
+                            {selectedFile.newCount || 0}
+                          </strong>
+                        </div>
+                        <div className="py-3 flex items-center justify-between">
+                          <span className="font-semibold text-[#66837b]">
+                            Already imported (skipped)
+                          </span>
+                          <strong className="font-extrabold text-[#66837b]">
+                            {selectedFile.skippedCount || 0}
+                          </strong>
+                        </div>
+                        <div className="py-3 flex items-center justify-between">
+                          <span className="font-semibold text-[#66837b]">Updated</span>
+                          <strong className="font-extrabold text-[#11382f]">
+                            {selectedFile.updatedCount || 0}
+                          </strong>
+                        </div>
+                        <div className="py-3 flex items-center justify-between">
+                          <span className="font-semibold text-[#66837b]">Problems</span>
+                          <strong
+                            className={`font-extrabold ${
+                              (selectedFile.problemsCount || 0) > 0 ? 'text-[#c25e19]' : 'text-[#11382f]'
+                            }`}
+                          >
+                            {selectedFile.problemsCount || 0}
+                          </strong>
+                        </div>
+                      </div>
 
-                  {/* Primary CTA Button matching PDF Page 4 & 11 */}
-                  <button
-                    type="button"
-                    onClick={handleImportNow}
-                    disabled={importing}
-                    className="mt-6 w-full rounded-2xl bg-[#0e655d] py-3 text-center text-xs font-extrabold text-white shadow-xs hover:bg-[#0a4f49] disabled:opacity-50 transition active:scale-98"
-                  >
-                    {importing ? (
-                      <span className="inline-flex items-center gap-2">
-                        <RefreshCw size={14} className="animate-spin" />
-                        Importing to Database…
-                      </span>
-                    ) : (
-                      'Import and refresh owner view'
-                    )}
-                  </button>
+                      {/* Primary CTA Button matching PDF Page 4 & 11 */}
+                      <button
+                        type="button"
+                        onClick={handleImportNow}
+                        disabled={importing}
+                        className="mt-6 w-full rounded-2xl bg-[#0e655d] py-3 text-center text-xs font-extrabold text-white shadow-xs hover:bg-[#0a4f49] disabled:opacity-50 transition active:scale-98"
+                      >
+                        {importing ? (
+                          <span className="inline-flex items-center gap-2">
+                            <RefreshCw size={14} className="animate-spin" />
+                            Importing to Database…
+                          </span>
+                        ) : (
+                          'Import and refresh owner view'
+                        )}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="py-8 text-center">
+                      <div className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-2xl bg-[#f0f6f3] text-[#52776c]">
+                        <FileCode size={20} />
+                      </div>
+                      <strong className="block text-xs font-bold text-[#11382f]">
+                        No file selected
+                      </strong>
+                      <p className="mt-1 text-[11px] text-[#708d83]">
+                        Drop a Tally XML or Excel export on the left or click &ldquo;Load Demo Tally XML&rdquo; to preview vouchers and master entries.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -552,27 +565,33 @@ export default function TallyIntegrationPage() {
                 Recent imports
               </h2>
 
-              <div className="space-y-2.5">
-                {recentImports.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between rounded-2xl border border-[#e1e9e3] bg-white p-4 shadow-2xs transition hover:shadow-xs"
-                  >
-                    <div className="min-w-0 pr-3">
-                      <span className="block text-xs text-[#708c83]">{item.date}</span>
-                      <strong className="mt-0.5 block truncate text-xs font-bold text-[#11382f]">
-                        {item.filename}
-                      </strong>
-                    </div>
-
-                    <span
-                      className={`rounded-xl px-3 py-1 text-xs font-bold shrink-0 ${item.badgeTone}`}
+              {recentImports.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[#d6e3dc] bg-white p-6 text-center text-xs text-[#708d83]">
+                  No import history yet. Upload your first Tally XML or Excel export above.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {recentImports.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between rounded-2xl border border-[#e1e9e3] bg-white p-4 shadow-2xs transition hover:shadow-xs"
                     >
-                      {item.badge}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                      <div className="min-w-0 pr-3">
+                        <span className="block text-xs text-[#708c83]">{item.date}</span>
+                        <strong className="mt-0.5 block truncate text-xs font-bold text-[#11382f]">
+                          {item.filename}
+                        </strong>
+                      </div>
+
+                      <span
+                        className={`rounded-xl px-3 py-1 text-xs font-bold shrink-0 ${item.badgeTone}`}
+                      >
+                        {item.badge}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
